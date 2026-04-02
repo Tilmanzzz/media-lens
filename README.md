@@ -14,10 +14,7 @@
                 Podcast RSS / APIs
                         │
                         ▼
-                 Ingestion Layer
-                        │
-                        ▼
-                 Raw Storage (bronze)
+             Ingestion Layer (Raw/bronze)
                         │
                         ▼
                  Processing Layer (silver)
