@@ -1,0 +1,71 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: "podcasts"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASS}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql  # auto-runs on first start
+
+  # postgres admin tool
+  pgadmin:
+    image: dpage/pgadmin4
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    volumes:
+      - ./db/pgadmin/servers.json:/pgadmin4/servers.json
+    depends_on:
+      - postgres
+
+  # datalake
+  minio:
+    image: minio/minio
+    ports: [
+      9000:9000,
+      9001:9001
+    ]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASS}
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 1
+  
+  ingestion:
+    build: ./src/ingestion
+    depends_on:
+      minio:
+        condition: service_healthy
+    env_file:
+      - .env
+
+  processing:
+    build: ./src/processing
+    depends_on:
+      postgres:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # This syntax maps the .env variable to the container
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      # You can also set the S3 endpoint here for consistency
+      - S3_ENDPOINT=http://minio:9000
+      - POSTGRES_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASS}@postgres:5432/podcasts
+
+volumes:
+  postgres_data:
+  minio_data:
