@@ -49,6 +49,21 @@ functions return placeholder sentiment (`neutral`, `0.5`) and topics
 - Backend module
 - Frontend module
 - Scheduling/Orchestration
+    - e.g. Airflow, Prefect, etc.
+
+- Ingestion
+    - Idempotency - guid tag
+    - MinIO event notifications → processing trigger
+
+- Config module
+    - check for env variables, etc. (e.g. pydantic-settings)
+- PostgreSQL
+      - full-text-search
+      - status column (pending, failed, enriched, ...)
+- Logging
+BONUS:
+- metrics and dashboard (e.g. Prometheus + Grafana)
+- 
 
 ### Getting Started
 
