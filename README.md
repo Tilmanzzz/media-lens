@@ -74,7 +74,8 @@ docker compose up
 
 # Architecture
 
-```flowchart TD
+```mermaid
+flowchart TD
     RSS[Podcast RSS / APIs]
     INGEST[Ingestion layer\nGo]
     MINIO[MinIO\nRaw XML · audio · transcripts]
