@@ -1,0 +1,6 @@
+INGESTION LAYER
+
+Discovery
+- Podcast Index API
+- https://podcastindex-org.github.io/docs-api/#overview--libraries
+

@@ -1,0 +1,24 @@
+services:
+  minio:
+    image: minio/minio
+    ports: [
+      9000:9000,
+      9001:9001
+    ]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASS}
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 1
+  
+  ingestion:
+    build: ./src/ingestion
+    depends_on:
+      minio:
+        condition: service_healthy
+    env_file:
+      - .env
