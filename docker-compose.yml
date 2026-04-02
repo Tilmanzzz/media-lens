@@ -42,15 +42,15 @@ services:
       retries: 1
   
   ingestion:
-    build: ./src/ingestion
+    build: ./src/01_ingestion
     depends_on:
       minio:
         condition: service_healthy
     env_file:
       - .env
 
-  processing:
-    build: ./src/processing
+  processing_silver:
+    build: ./src/02_processing/02_silver/
     depends_on:
       postgres:
         condition: service_started
