@@ -3,6 +3,7 @@ module github.com/tilmanzzz/audio-lens/ingestion
 go 1.25.5
 
 require (
+	github.com/jjgmckenzie/podcastindex v0.1.4
 	github.com/joho/godotenv v1.5.1
 	github.com/minio/minio-go/v7 v7.0.100
 )
