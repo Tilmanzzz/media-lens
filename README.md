@@ -20,7 +20,7 @@ Ingestion (Go) → MinIO (bronze bucket) → Processing (Python) → PostgreSQL
 | DB Admin UI | pgAdmin 4 | 5050 |
 | Ingestion | Go | - |
 | Silver Processing | Python | - |
-| Enriched Processing | - | - |
+| Enriched Processing | Python, LLMs(gemma3:4b, qwen3-embedding:4b), model(wav2vec-base-superb-er) | - |
 | Backend | - | - |
 | Frontend | - | - |
 | Orchestration | Airflow/Perfect | - |
