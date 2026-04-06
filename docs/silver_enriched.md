@@ -7,7 +7,7 @@ The silver_enriched stage turns intermediate podcast data into higher-value sema
 - Emotion labels from audio
 - Claim-level fact-check verdicts with evidence links
 - Episode and segment summaries
-- Chunk, segment, and episode embeddings for semantic retrieval/vector indexing
+- Chunk, segment, episode, and podcast embeddings for semantic retrieval/vector indexing
 
 This stage blends deterministic processing (grouping, sorting, parsing) with model-driven reasoning (classification, extraction, summarization, verification).
 
@@ -128,12 +128,12 @@ This is the most agentic component in silver_enriched. It uses a multi-step orch
 
 ```mermaid
 flowchart TD
-    A[Transcript] --> B[(LLM) Extractor Agent: Extract factual claims as JSON list]
+    A[Transcript] --> B[LLM Extractor Agent: Extract factual claims as JSON list]
     B --> C[For each claim]
-    C --> D[(LLM) Research Agent: Generate search queries]
+    C --> D[LLM Research Agent: Generate search queries]
     D --> E[DDGS web search]
     E --> F[Compact + dedupe sources]
-    F --> G[(LLM) Judge Agent: Verify claim using only provided evidence]
+    F --> G[LLM Judge Agent: Verify claim using only provided evidence]
     G --> H[Normalize verdict + sources]
     H --> I[Output JSON: claim, verdict, explanation, sources]
 ```
@@ -198,6 +198,7 @@ flowchart TD
 Transcript Embedder produces dense vector representations from transcript content at three granularities:
 
 - Chunk-level embeddings
+- Podcast-level embeddings (aggregated across episodes)
 - Episode-level embeddings (merged from ordered chunks)
 - Segment-level embeddings (merged from ordered chunks)
 
@@ -216,22 +217,25 @@ flowchart TD
     A[Chunks JSON] --> B[Apply optional filters: podcast/episode/segment]
     B --> C{Mode}
     C -->|chunk/all| D[Read input_text_field from each chunk]
-    C -->|episode/all| E[Group by podcast_id + episode_id]
-    C -->|segment/all| F[Group by podcast_id + episode_id + segment_id]
-    E --> G[Sort + concatenate chunk text]
-    F --> H[Sort + concatenate chunk text]
-    D --> I[Add task instruction prefix]
+    C -->|podcast/all| E[Group by podcast_id]
+    C -->|episode/all| F[Group by podcast_id + episode_id]
+    C -->|segment/all| G[Group by podcast_id + episode_id + segment_id]
+    E --> H[Randomly sample up to max_podcast_sample_size podcasts]
+    H --> I[Sort + concatenate text]
+    F --> I
     G --> I
-    H --> I
-    I --> J[Batch Ollama embedding calls]
-    J --> K[Attach vector + metadata per output record]
+    D --> J[Add task instruction prefix]
+    I --> J
+    J --> K[Batch Ollama embedding calls]
+    K --> L[Attach vector + metadata per output record]
 ```
 
 ### Key design notes
 
 - Text field selection is configurable (`input_text_field`) with fallback handling for `transcript_text` and `transcription`.
 - Embeddings are generated in configurable batches (`batch_size`) for throughput and memory control.
-- Output envelope is normalized under `embedded` with optional `chunk_level`, `episode_level`, and `segment_level` sections depending on run mode.
+- Podcast-level mode samples up to a configurable maximum number of podcasts (`max_podcast_sample_size`) from available podcast IDs.
+- Output envelope is normalized under `embedded` with optional `chunk_level`, `podcast_level`, `episode_level`, and `segment_level` sections depending on run mode.
 - Group-level embedding records include `source_chunk_count` for provenance.
 
 ## Configuration Model

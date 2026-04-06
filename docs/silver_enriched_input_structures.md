@@ -115,6 +115,7 @@ The transcript embedder consumes transcript chunks represented as objects, loade
 - Type: List[Chunk]
 - Methods:
   - embed_chunks(chunks)
+  - embed_podcasts(chunks)
   - embed_episodes(chunks)
   - embed_segments(chunks)
 
@@ -150,6 +151,18 @@ Format B (object with chunks key):
 }
 ```
 
+Podcast-level minimal input example:
+
+```json
+[
+  {
+    "episode_id": "ep_42",
+    "podcast_id": "pod_lex",
+    "transcription": "Transformers changed the field of NLP forever."
+  }
+]
+```
+
 ### Chunk schema expectations
 
 Common identifier fields used for grouping/filtering:
@@ -171,6 +184,8 @@ Metadata fields that are preserved when present:
 
 ### Ordering semantics
 
+- Podcast-level embeddings aggregate text grouped by `podcast_id` across episodes.
+- For podcast-level mode, at most `max_podcast_sample_size` podcasts are randomly sampled from all available podcast IDs.
 - Episode-level embeddings are built from chunks sorted by (segment_id, chunk_id).
 - Segment-level embeddings are built from chunks sorted by (segment_id, chunk_id).
 
@@ -187,6 +202,16 @@ The executor writes output in this structure:
         "embedding": [0.01, -0.02, 0.03],
         "embedding_model": "qwen3-embedding:4b",
         "embedding_level": "chunk"
+      }
+    ],
+    "podcast_level": [
+      {
+        "podcast_id": "pod_lex",
+        "source_episode_count": 2,
+        "source_episode_ids": ["ep_42", "ep_43"],
+        "embedding": [0.01, -0.02, 0.03],
+        "embedding_model": "qwen3-embedding:4b",
+        "embedding_level": "podcast"
       }
     ],
     "episode_level": [
@@ -219,7 +244,8 @@ The executor writes output in this structure:
 - input_text_field: Which key to read transcript text from.
 - task_instruction: Prefix added before each text before embedding.
 - batch_size: Number of texts per embedding batch request.
-- default_mode: Which output levels to produce (`chunk`, `episode`, `segment`, `all`).
+- max_podcast_sample_size: Maximum number of podcasts randomly selected for podcast-level embedding.
+- default_mode: Which output levels to produce (`chunk`, `podcast`, `episode`, `segment`, `all`).
 - embed_options: Extra parameters forwarded to `ollama.embed`.
 
 ## 4) text_summarizer Inputs
@@ -344,6 +370,7 @@ Recommended checks before calling silver_enriched modules:
   - chunks is a non-empty list
   - selected text field exists (or fallback text fields are present)
   - ids are consistent for grouping/filtering across chunk/episode/segment modes
+  - podcast mode processes only a random subset of podcasts up to `max_podcast_sample_size`
 
 ## How Config and Inputs Interact
 

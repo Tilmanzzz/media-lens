@@ -12,6 +12,7 @@ class TranscriptEmbedderConfig:
     task_instruction: str = "Represent this podcast transcript segment for semantic retrieval:"
     input_text_field: str = "transcription"
     batch_size: int = 32
+    max_podcast_sample_size: int = 5
     default_input_path: str = "test/transcript_embedder_test_input.json"
     default_output_path: str = "test/embedded_output.json"
     default_mode: str = "all"
@@ -47,6 +48,7 @@ class TranscriptEmbedderConfig:
             "task_instruction": self.task_instruction,
             "input_text_field": self.input_text_field,
             "batch_size": self.batch_size,
+            "max_podcast_sample_size": self.max_podcast_sample_size,
             "default_input_path": self.default_input_path,
             "default_output_path": self.default_output_path,
             "default_mode": self.default_mode,

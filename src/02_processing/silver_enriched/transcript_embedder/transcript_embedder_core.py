@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -30,6 +31,8 @@ class TranscriptEmbedder:
 
         if self.config.batch_size <= 0:
             raise ValueError("batch_size must be greater than 0")
+        if self.config.max_podcast_sample_size <= 0:
+            raise ValueError("max_podcast_sample_size must be greater than 0")
 
     def _setup_logger(self, logging_enabled: Optional[bool], log_level: Optional[str]) -> None:
         enabled = self.config.logging_enabled if logging_enabled is None else logging_enabled
@@ -59,6 +62,13 @@ class TranscriptEmbedder:
         grouped: Dict[Tuple[Any, Any, Any], List[Dict[str, Any]]] = defaultdict(list)
         for chunk in chunks:
             grouped[(chunk.get("podcast_id"), chunk.get("episode_id"), chunk.get("segment_id"))].append(chunk)
+        return grouped
+
+    @staticmethod
+    def _group_by_podcast(chunks: List[Dict[str, Any]]) -> Dict[Any, List[Dict[str, Any]]]:
+        grouped: Dict[Any, List[Dict[str, Any]]] = defaultdict(list)
+        for chunk in chunks:
+            grouped[chunk.get("podcast_id")].append(chunk)
         return grouped
 
     @staticmethod
@@ -195,6 +205,57 @@ class TranscriptEmbedder:
                 "embedding": embedding,
                 "embedding_model": self.config.model,
                 "embedding_level": "segment",
+            }
+            for record, embedding in zip(records, vectors)
+        ]
+
+    def embed_podcasts(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        grouped = self._group_by_podcast(chunks)
+        records: List[Dict[str, Any]] = []
+
+        available_podcast_ids = list(grouped.keys())
+        selected_count = min(self.config.max_podcast_sample_size, len(available_podcast_ids))
+        if len(available_podcast_ids) > selected_count:
+            selected_podcast_ids = random.sample(available_podcast_ids, selected_count)
+        else:
+            selected_podcast_ids = available_podcast_ids
+
+        self.logger.info(
+            "Selecting %d of %d podcasts for podcast-level embedding",
+            len(selected_podcast_ids),
+            len(available_podcast_ids),
+        )
+
+        for podcast_id in selected_podcast_ids:
+            podcast_items = grouped[podcast_id]
+            ordered = sorted(podcast_items, key=lambda item: str(item.get("episode_id", "")))
+            text = "\n\n".join(self._get_text(item) for item in ordered if self._get_text(item))
+            if not text:
+                continue
+
+            episode_ids = sorted({str(item.get("episode_id", "")) for item in ordered if item.get("episode_id") is not None})
+            records.append(
+                {
+                    "podcast_id": podcast_id,
+                    "podcast_title": ordered[0].get("podcast_title", "") if ordered else "",
+                    "source_episode_count": len(episode_ids),
+                    "source_episode_ids": episode_ids,
+                    "text": text,
+                }
+            )
+
+        self.logger.info("Embedding %d podcasts", len(records))
+        vectors = self._embed_texts([self._prompted_text(record["text"]) for record in records])
+
+        return [
+            {
+                "podcast_id": record["podcast_id"],
+                "podcast_title": record["podcast_title"],
+                "source_episode_count": record["source_episode_count"],
+                "source_episode_ids": record["source_episode_ids"],
+                "embedding": embedding,
+                "embedding_model": self.config.model,
+                "embedding_level": "podcast",
             }
             for record, embedding in zip(records, vectors)
         ]

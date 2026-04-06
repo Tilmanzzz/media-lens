@@ -53,6 +53,9 @@ def build_output(embedder: TranscriptEmbedder, chunks: List[Dict[str, Any]], mod
     if mode in {"chunk", "all"}:
         output["embedded"]["chunk_level"] = embedder.embed_chunks(chunks)
 
+    if mode in {"podcast", "all"}:
+        output["embedded"]["podcast_level"] = embedder.embed_podcasts(chunks)
+
     if mode in {"episode", "all"}:
         output["embedded"]["episode_level"] = embedder.embed_episodes(chunks)
 
@@ -63,10 +66,10 @@ def build_output(embedder: TranscriptEmbedder, chunks: List[Dict[str, Any]], mod
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Create transcript embeddings for chunk, episode, and segment levels.")
+    parser = argparse.ArgumentParser(description="Create transcript embeddings for chunk, podcast, episode, and segment levels.")
     parser.add_argument("--config", default="transcript_embedder_config.json", help="Path to config JSON")
     parser.add_argument("--input", default=None, help="Path to input transcript chunks JSON")
-    parser.add_argument("--mode", choices=["chunk", "episode", "segment", "all"], default=None)
+    parser.add_argument("--mode", choices=["chunk", "podcast", "episode", "segment", "all"], default=None)
 
     parser.add_argument("--podcast-id", default=None)
     parser.add_argument("--episode-id", default=None)
