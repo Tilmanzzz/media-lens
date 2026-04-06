@@ -1,0 +1,300 @@
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional
+
+from ddgs import DDGS
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_ollama import ChatOllama
+
+SRC_DIR = str(Path(__file__).resolve()).split("src")[0] + "src/02_processing"
+if str(SRC_DIR) not in sys.path:
+    sys.path.append(str(SRC_DIR))
+
+from common.app_logger import AppLogger
+from fact_checker_config import FactCheckerConfig
+
+
+def _strip_code_fences(text: str) -> str:
+    return text.replace("```json", "").replace("```", "").strip()
+
+
+def _parse_json(text: str, fallback: Any) -> Any:
+    try:
+        return json.loads(_strip_code_fences(text))
+    except Exception:
+        return fallback
+
+
+def _dedupe_preserve_order(items: Iterable[str]) -> List[str]:
+    seen = set()
+    ordered: List[str] = []
+    for item in items:
+        value = item.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
+
+
+def _compact_sources(raw_results: Iterable[Dict[str, Any]], limit: int) -> List[Dict[str, str]]:
+    compacted: List[Dict[str, str]] = []
+    seen_urls = set()
+
+    for result in raw_results:
+        url = str(result.get("href") or result.get("url") or "").strip()
+        if not url or url in seen_urls:
+            continue
+
+        seen_urls.add(url)
+        compacted.append(
+            {
+                "url": url,
+                "title": str(result.get("title") or "").strip(),
+                "snippet": str(result.get("body") or result.get("snippet") or "").strip(),
+            }
+        )
+
+        if len(compacted) >= limit:
+            break
+
+    return compacted
+
+
+class FactChecker:
+    def __init__(
+        self,
+        config: Optional[FactCheckerConfig] = None,
+        config_path: Optional[str | Path] = None,
+        logging_enabled: Optional[bool] = None,
+        log_level: Optional[str] = None,
+    ):
+        if config is None and config_path is not None:
+            config = FactCheckerConfig.from_file(config_path)
+        self.config = config or FactCheckerConfig()
+        self._setup_logger(logging_enabled=logging_enabled, log_level=log_level)
+
+        self.llm = ChatOllama(
+            model=self.config.model,
+            temperature=self.config.temperature,
+            **self.config.llm_options,
+        )
+        self.logger.debug("Initialized FactChecker with model=%s, region=%s", self.config.model, self.config.region)
+
+    def _setup_logger(self, logging_enabled: Optional[bool], log_level: Optional[str]) -> None:
+        enabled = self.config.logging_enabled if logging_enabled is None else logging_enabled
+        level_name = (log_level or self.config.log_level or "INFO")
+        log_dir = Path(self.config.log_dir)
+        if not log_dir.is_absolute():
+            log_dir = Path(__file__).resolve().parent / log_dir
+
+        self.logger = AppLogger(
+            module_name="fact_checker",
+            enabled=enabled,
+            level=level_name,
+            log_dir=log_dir,
+            log_file=self.config.log_file,
+        ).build()
+
+    def set_logging(self, enabled: bool, log_level: Optional[str] = None) -> None:
+        self._setup_logger(logging_enabled=enabled, log_level=log_level)
+
+    def fact_check(self, transcript: str) -> Dict[str, List[Dict[str, Any]]]:
+        self.logger.info("Starting fact check")
+        claims = self._extract_claims(transcript)
+        self.logger.info("Extracted %d claims", len(claims))
+        if not claims:
+            self.logger.info("No factual claims found")
+            return {"claims": []}
+
+        research = self._research_claims(claims)
+        self.logger.info("Research completed with %d results", sum(len(v) for v in research.values()))
+        verdicts = self._verify_claims(research)
+        self.logger.info("Fact check completed with %d verdicts", len(verdicts))
+        return {"claims": verdicts}
+
+    def fact_check_json(self, transcript: str, indent: Optional[int] = None) -> str:
+        return json.dumps(self.fact_check(transcript), indent=indent, ensure_ascii=False)
+
+    def _extract_claims(self, transcript: str) -> List[str]:
+        system_prompt = """
+        You are an expert in extracting factual claims from transcript text.
+
+        Rules:
+        1. Extract only verifiable, real-world factual claims.
+        2. Ignore fictional stories, opinions, jokes, speculation, rhetorical questions and personal preferences.
+        3. Return ONLY a JSON list of claim strings.
+        4. If no factual claims exist, return [].
+        """.strip()
+
+        prompt = f"""
+        Extract factual claims from this transcript.
+
+        Transcript:
+        {transcript}
+        """.strip()
+
+        response = self.llm.invoke(
+            [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=prompt),
+            ]
+        )
+
+        claims = _parse_json(getattr(response, "content", ""), [])
+        if not isinstance(claims, list):
+            self.logger.warning("Claim extraction response was not a JSON list")
+            return []
+
+        cleaned = [str(c).strip() for c in claims if str(c).strip()]
+        return _dedupe_preserve_order(cleaned)
+
+    def _generate_queries(self, claim: str) -> List[str]:
+        system_prompt = """
+        You are an expert researcher.
+        Generate concise search queries that are likely to find high-quality evidence for a claim.
+        Return ONLY a JSON list of strings.
+        """.strip()
+
+        prompt = f"""
+        Generate {self.config.max_queries_per_claim} search queries for this claim.
+
+        Claim:
+        {claim}
+        """.strip()
+
+        response = self.llm.invoke(
+            [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=prompt),
+            ]
+        )
+
+        queries = _parse_json(getattr(response, "content", ""), [])
+        if not isinstance(queries, list):
+            return [claim]
+
+        cleaned = [str(q).strip() for q in queries if str(q).strip()]
+        deduped = _dedupe_preserve_order(cleaned)
+        self.logger.debug("Generated %d queries for claim: %s", len(deduped), claim)
+        return deduped[: self.config.max_queries_per_claim] or [claim]
+
+    def _research_claims(self, claims: List[str]) -> Dict[str, List[Dict[str, str]]]:
+        research_data: Dict[str, List[Dict[str, str]]] = {}
+
+        with DDGS() as ddgs:
+            for claim in claims:
+                self.logger.debug("Researching claim: %s", claim)
+                queries = self._generate_queries(claim)
+                raw_results: List[Dict[str, Any]] = []
+
+                for query in queries:
+                    try:
+                        result_iter = ddgs.text(
+                            query,
+                            max_results=self.config.max_search_results_per_query,
+                            region=self.config.region,
+                        )
+                        raw_results.extend(list(result_iter))
+                    except Exception:
+                        self.logger.exception("Search failed for query: %s", query)
+                        continue
+
+                research_data[claim] = _compact_sources(raw_results, self.config.max_sources_per_claim)
+                self.logger.debug(
+                    "Collected %d compacted sources for claim",
+                    len(research_data[claim]),
+                )
+
+        return research_data
+
+    def _verify_claims(self, research: Dict[str, List[Dict[str, str]]]) -> List[Dict[str, Any]]:
+        verdicts: List[Dict[str, Any]] = []
+        allowed_verdicts = ", ".join(self.config.allowed_verdicts)
+
+        for claim in research.keys():
+            sources = research[claim]
+            if not sources:
+                self.logger.debug("No sources found for claim, marking UNVERIFIABLE: %s", claim)
+                verdicts.append(
+                    {
+                        "claim": claim,
+                        "verdict": "UNVERIFIABLE",
+                        "explanation": "No reliable evidence could be retrieved for this claim.",
+                        "sources": [],
+                    }
+                )
+                continue
+
+            system_prompt = f"""
+            You are a professional fact checker.
+            Use ONLY the provided evidence. Do not use outside knowledge.
+            The explanation MUST BE concise and easy to understand.
+
+            Allowed verdicts: {allowed_verdicts}
+
+            Return ONLY valid JSON with this schema:
+            {{
+            "claim": "...",
+            "verdict": "...",
+            "explanation": "...",
+            "sources": ["https://..."]
+            }}
+            """.strip()
+
+            verify_prompt = f"""
+            Claim:
+            {claim}
+
+            Available Evidence:
+            {research[claim]}
+            """.strip()
+
+            response = self.llm.invoke(
+                [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=verify_prompt),
+                ]
+            )
+
+            parsed = _parse_json(getattr(response, "content", ""), {})
+            if not isinstance(parsed, dict):
+                self.logger.warning("Verifier response was not a JSON object for claim: %s", claim)
+            verdicts.append(self._normalize_verdict(claim, parsed, sources))
+
+        return verdicts
+
+    def _normalize_verdict(
+        self,
+        claim: str,
+        parsed: Dict[str, Any],
+        fallback_sources: List[Dict[str, str]],
+    ) -> Dict[str, Any]:
+        if not isinstance(parsed, dict):
+            parsed = {}
+
+        verdict = str(parsed.get("verdict", "UNVERIFIABLE")).strip().upper()
+        if verdict not in self.config.allowed_verdicts:
+            verdict = "UNVERIFIABLE"
+
+        explanation = str(parsed.get("explanation", "Parsing failed or insufficient evidence.")).strip()
+
+        source_urls = parsed.get("sources", [])
+        if not isinstance(source_urls, list):
+            source_urls = []
+
+        normalized_sources = [str(url).strip() for url in source_urls if str(url).strip()]
+        if not normalized_sources:
+            normalized_sources = [src["url"] for src in fallback_sources if src.get("url")]
+
+        normalized_sources = _dedupe_preserve_order(normalized_sources)[: self.config.max_sources_per_claim]
+
+        return {
+            "claim": claim,
+            "verdict": verdict,
+            "explanation": explanation,
+            "sources": normalized_sources,
+        }

@@ -1,0 +1,9 @@
+{
+  "model": "gemma3:4b",
+  "temperature": 0.0,
+  "logging_enabled": true,
+  "log_level": "INFO",
+  "log_dir": "../logs",
+  "log_file": "text_summarizer.log",
+  "llm_options": {}
+}
