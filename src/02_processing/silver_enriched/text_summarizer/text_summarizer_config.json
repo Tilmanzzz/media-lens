@@ -1,6 +1,9 @@
 {
   "model": "gemma3:4b",
   "temperature": 0.0,
+  "default_input_path": "./test/text_summarizer_test_input.json",
+  "default_output_path": "./test/output_text_summarizer.json",
+  "default_mode": "both",
   "logging_enabled": true,
   "log_level": "INFO",
   "log_dir": "../logs",

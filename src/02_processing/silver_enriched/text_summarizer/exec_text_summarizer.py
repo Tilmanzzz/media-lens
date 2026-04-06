@@ -70,14 +70,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Summarize podcast episodes and segments from transcript chunks.")
 
     parser.add_argument("--config", default="text_summarizer_config.json", help="Path to config JSON")
-    parser.add_argument("--input", default="text_summarizer_test_input.json", help="Path to chunks input JSON")
-    parser.add_argument("--mode", choices=["episode", "segment", "both"], default="both")
+    parser.add_argument("--input", default=None, help="Path to chunks input JSON")
+    parser.add_argument("--mode", choices=["episode", "segment", "both"], default=None)
 
     parser.add_argument("--podcast-id", type=int, default=None)
     parser.add_argument("--episode-id", type=int, default=None)
     parser.add_argument("--segment-id", type=int, default=None)
 
-    parser.add_argument("--output", default=None, help="Optional output JSON file path")
+    parser.add_argument("--output", default=None, help="Output JSON file path")
 
     return parser.parse_args()
 
@@ -89,7 +89,11 @@ def main() -> None:
     summarizer = TextSummarizer(config=config)
     summarizer.logger.info("Starting text summarization run")
 
-    chunks = load_chunks(args.input)
+    input_path = args.input or config.default_input_path
+    mode = args.mode or config.default_mode
+    output_path = args.output or config.default_output_path
+
+    chunks = load_chunks(input_path)
     filtered_chunks = apply_filters(chunks, args.podcast_id, args.episode_id, args.segment_id)
 
     if not filtered_chunks:
@@ -99,25 +103,24 @@ def main() -> None:
 
     output: Dict[str, Any] = {}
 
-    if args.mode in {"episode", "both"}:
+    if mode in {"episode", "both"}:
         episode_summaries = summarizer.summarize_all_episodes(filtered_chunks)
         output["episodes"] = episode_summaries
         print_episode_summaries(episode_summaries)
 
-    if args.mode in {"segment", "both"}:
+    if mode in {"segment", "both"}:
         segment_summaries = summarizer.summarize_all_segments(filtered_chunks)
         output["segments"] = segment_summaries
         print_segment_summaries(segment_summaries)
 
-    if args.output:
-        out_path = Path(args.output).expanduser()
-        if not out_path.is_absolute():
-            out_path = Path(__file__).resolve().parent / out_path
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with out_path.open("w", encoding="utf-8") as f:
-            json.dump(output, f, indent=2, ensure_ascii=False)
-        print(f"\nSaved output to: {out_path}")
-        summarizer.logger.info("Saved output JSON to %s", out_path)
+    out_path = Path(output_path).expanduser()
+    if not out_path.is_absolute():
+        out_path = Path(__file__).resolve().parent / out_path
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8") as f:
+        json.dump(output, f, indent=2, ensure_ascii=False)
+    print(f"\nSaved output to: {out_path}")
+    summarizer.logger.info("Saved output JSON to %s", out_path)
 
     summarizer.logger.info("Text summarization run finished")
 

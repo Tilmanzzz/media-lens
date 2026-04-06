@@ -18,6 +18,8 @@ DEFAULT_ALLOWED_VERDICTS = [
 class FactCheckerConfig:
     model: str = "gemma3:4b"
     temperature: float = 0.0
+    default_transcript_path: str = "test/fact_checker_test_transcript.txt"
+    default_output_path: str = "test/output_factchecker.json"
     region: str = "us-en"
     max_queries_per_claim: int = 3
     max_search_results_per_query: int = 2
@@ -52,6 +54,8 @@ class FactCheckerConfig:
         return {
             "model": self.model,
             "temperature": self.temperature,
+            "default_transcript_path": self.default_transcript_path,
+            "default_output_path": self.default_output_path,
             "region": self.region,
             "max_queries_per_claim": self.max_queries_per_claim,
             "max_search_results_per_query": self.max_search_results_per_query,

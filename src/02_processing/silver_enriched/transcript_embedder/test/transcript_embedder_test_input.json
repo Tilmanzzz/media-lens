@@ -1,0 +1,20 @@
+[
+  {
+    "chunk_id": "chunk_001",
+    "episode_id": "ep_42",
+    "podcast_id": "pod_lex",
+    "segment_id": "seg_01",
+    "transcription": "Transformers changed the field of NLP forever.",
+    "podcast_title": "Lex Fridman Podcast",
+    "episode_title": "Future of AI"
+  },
+  {
+    "chunk_id": "chunk_002",
+    "episode_id": "ep_42",
+    "podcast_id": "pod_lex",
+    "segment_id": "seg_02",
+    "transcription": "They discuss the limitations of large language models.",
+    "podcast_title": "Lex Fridman Podcast",
+    "episode_title": "Future of AI"
+  }
+]
