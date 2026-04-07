@@ -1,0 +1,29 @@
+{
+  "episodes": [
+    {
+      "podcast_id": 1,
+      "podcast_title": "Data Stories",
+      "episode_id": 101,
+      "episode_title": "What Is Data Engineering",
+      "summary": "**Overall Summary:**\n\nThis podcast episode establishes data engineering as the critical process of building reliable data pipelines, highlighting their importance for effective analytics. The discussion centers on the distinction between batch and streaming data patterns, the use of orchestration tools for stability, and the crucial role of data quality and observability in supporting analytics products. Ultimately, the episode advocates for a pragmatic approach focused on business value and clear data governance.\n\n**Key Takeaways:**\n\n*   Data engineering is foundational for analytics products, relying on robust data pipelines.\n*   Batch and streaming data patterns represent distinct approaches to data processing.\n*   Orchestration tools are essential for creating stable and maintainable data pipelines, reducing reliance on ad hoc scripts.\n*   Data quality and observability (lineage, alerts, ownership) are vital for effective analytics.\n*   Start with clear data contracts, monitor data freshness, and prioritize business outcomes over tool selection."
+    }
+  ],
+  "segments": [
+    {
+      "podcast_id": 1,
+      "podcast_title": "Data Stories",
+      "episode_id": 101,
+      "episode_title": "What Is Data Engineering",
+      "segment_id": 1,
+      "summary": "Data engineering focuses on building reliable data pipelines, which are crucial for analytics. The segment highlights the importance of batch and streaming data processing, alongside orchestration tools to prevent errors and maintain stable workflows. Ultimately, robust pipelines are the bedrock of successful analytics products."
+    },
+    {
+      "podcast_id": 1,
+      "podcast_title": "Data Stories",
+      "episode_id": 101,
+      "episode_title": "What Is Data Engineering",
+      "segment_id": 2,
+      "summary": "This podcast segment focused on improving data quality through observability, emphasizing the importance of lineage, alerts, and clear team ownership. The speakers advised starting with defined data contracts, regularly monitoring freshness, and prioritizing business value over simply adopting new tools."
+    }
+  ]
+}

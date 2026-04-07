@@ -1,0 +1,17 @@
+[
+  {
+    "episode_id": "ep_42",
+    "podcast_id": "pod_lex",
+    "transcription": "Transformers changed the field of NLP forever. They discuss the limitations of large language models."
+  },
+  {
+    "episode_id": "ep_43",
+    "podcast_id": "pod_lex",
+    "transcription": "The conversation moves to AI safety, alignment, and long-term societal impact."
+  },
+  {
+    "episode_id": "ep_88",
+    "podcast_id": "pod_data",
+    "transcription": "Data engineering pipelines are compared across batch and streaming architectures."
+  }
+]

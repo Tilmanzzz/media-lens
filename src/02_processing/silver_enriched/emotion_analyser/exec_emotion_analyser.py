@@ -11,7 +11,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Score emotion from WAV or M4A audio files")
     parser.add_argument("files", nargs="*", help="Paths to .wav or .m4a files")
     parser.add_argument("--config", default="./emotion_analyser_config.json", help="Path to config JSON")
-    parser.add_argument("--cache-dir", default="./hf_superb", help="Override Hugging Face cache directory")
+    parser.add_argument("--cache-dir", default=None, help="Override Hugging Face cache directory")
     return parser
 
 
@@ -19,7 +19,7 @@ def main() -> None:
     args = _build_parser().parse_args()
 
     config = EmotionConfig.from_file(args.config)
-    if args.cache_dir:
+    if args.cache_dir is not None:
         config.cache_dir = args.cache_dir
 
     scorer = EmotionAnalyser(config=config)

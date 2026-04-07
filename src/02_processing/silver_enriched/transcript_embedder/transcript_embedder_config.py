@@ -7,20 +7,23 @@ from typing import Any, Dict
 
 
 @dataclass(slots=True)
-class TextSummarizerConfig:
-    model: str = "gemma3:4b"
-    temperature: float = 0.0
-    default_input_path: str = "text_summarizer_test_input.json"
-    default_output_path: str = "output_text_summarizer.json"
-    default_mode: str = "both"
-    logging_enabled: bool = False
+class TranscriptEmbedderConfig:
+    model: str = "qwen3-embedding:4b"
+    task_instruction: str = "Represent this podcast transcript segment for semantic retrieval:"
+    input_text_field: str = "transcription"
+    batch_size: int = 32
+    max_podcast_sample_size: int = 5
+    default_input_path: str = "test/transcript_embedder_test_input.json"
+    default_output_path: str = "test/embedded_output.json"
+    default_mode: str = "all"
+    logging_enabled: bool = True
     log_level: str = "INFO"
     log_dir: str = "../logs"
-    log_file: str = "text_summarizer.log"
-    llm_options: Dict[str, Any] = field(default_factory=dict)
+    log_file: str = "transcript_embedder.log"
+    embed_options: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_file(cls, config_path: str | Path) -> "TextSummarizerConfig":
+    def from_file(cls, config_path: str | Path) -> "TranscriptEmbedderConfig":
         raw_path = Path(config_path).expanduser()
 
         if raw_path.is_absolute():
@@ -42,7 +45,10 @@ class TextSummarizerConfig:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "model": self.model,
-            "temperature": self.temperature,
+            "task_instruction": self.task_instruction,
+            "input_text_field": self.input_text_field,
+            "batch_size": self.batch_size,
+            "max_podcast_sample_size": self.max_podcast_sample_size,
             "default_input_path": self.default_input_path,
             "default_output_path": self.default_output_path,
             "default_mode": self.default_mode,
@@ -50,5 +56,5 @@ class TextSummarizerConfig:
             "log_level": self.log_level,
             "log_dir": self.log_dir,
             "log_file": self.log_file,
-            "llm_options": self.llm_options,
+            "embed_options": self.embed_options,
         }

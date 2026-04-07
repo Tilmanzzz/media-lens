@@ -1,0 +1,15 @@
+{
+  "model": "qwen3-embedding:4b",
+  "task_instruction": "Represent this podcast transcript segment for semantic retrieval:",
+  "input_text_field": "transcription",
+  "batch_size": 32,
+  "max_podcast_sample_size": 5,
+  "default_input_path": "./test/transcript_embedder_podcast_level_input.json",
+  "default_output_path": "./test/embedded_output.json",
+  "default_mode": "podcast",
+  "logging_enabled": true,
+  "log_level": "INFO",
+  "log_dir": "../logs",
+  "log_file": "transcript_embedder.log",
+  "embed_options": {}
+}
