@@ -78,6 +78,7 @@ func main() {
 	}
 }
 
+// TODO set specific audio filetype
 func streamAudioToMinIO(ctx context.Context, mc *minio.Client, enclosureUrl, podcastGuid, episodeGuid string) error {
 	client := &http.Client{Timeout: 30 * time.Minute}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, enclosureUrl, nil)
@@ -117,9 +118,11 @@ func streamAudioToMinIO(ctx context.Context, mc *minio.Client, enclosureUrl, pod
 func extensionFromContentType(ct string) string {
 	switch {
 	case strings.Contains(ct, "mpeg"):
+		return ".mpeg"
+	case strings.Contains(ct, "mp3"):
 		return ".mp3"
-	case strings.Contains(ct, "mp4"), strings.Contains(ct, "m4a"):
-		return ".m4a"
+	case strings.Contains(ct, "m4a"), strings.Contains(ct, "mp4"):
+		return ".mp4"
 	case strings.Contains(ct, "ogg"):
 		return ".ogg"
 	case strings.Contains(ct, "opus"):

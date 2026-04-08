@@ -2,6 +2,10 @@ from minio import Minio
 from db import get_connection
 import os
 import uuid
+import io
+import soundfile as sf
+import whisper
+
 from xml.etree import ElementTree as ET
 
 minio_client = Minio(
@@ -10,6 +14,23 @@ minio_client = Minio(
     secret_key=os.environ["MINIO_PASS"],
     secure=False,
 )
+model = whisper.load_model("base")  # think about moving that somewhere else
+
+
+def transcribe(audio_path: str):
+    resp = minio_client.get_object("bronze", audio_path)
+    try:
+        audio_data = resp.read()
+        file = io.BytesIO(audio_data)
+
+    finally:
+        resp.close()
+        resp.release_conn()
+
+    # Decode audio bytes into numpy array for Whisper
+    audio_np, _ = sf.read
+
+    return "This is a transcription"
 
 
 def split_into_sections(xml_content: str) -> list[str]:
@@ -77,5 +98,5 @@ def process_episode(xml_path: str, audio_path: str):
 if __name__ == "__main__":
     process_episode(
         xml_path="test/sample_podcast.xml",
-        audio_path="test/sample_podcast.mp3",  # update if your audio path differs
+        audio_path="test/sample_podcast.mp3",
     )
