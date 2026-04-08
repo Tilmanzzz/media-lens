@@ -4,7 +4,12 @@ import os
 import uuid
 import io
 import soundfile as sf
-import whisper
+from faster_whisper import WhisperModel
+import librosa
+import numpy as np
+from typing import Iterator
+from faster_whisper.transcribe import Segment
+
 
 from xml.etree import ElementTree as ET
 
@@ -14,23 +19,38 @@ minio_client = Minio(
     secret_key=os.environ["MINIO_PASS"],
     secure=False,
 )
-model = whisper.load_model("base")  # think about moving that somewhere else
+# compare model sizes: tiny, base, small, medium, large
+model = WhisperModel("base", device="cpu", compute_type="int8")
 
 
-def transcribe(audio_path: str):
+# for .wav
+# whisper expects 16k sampling rate mono channel f32 numpy array
+def decode_audio(audio_bytes: bytes) -> np.ndarray:
+    buffer = io.BytesIO(audio_bytes)
+    audio, sample_rate = sf.read(buffer)
+
+    # average to mono channel if more than one channel
+    if len(audio.shape) > 1:
+        audio = audio.mean(axis=1)
+
+    # set sampling rate to 16k
+    if sample_rate != 16000:
+        audio = librosa.resample(audio, orig_sr=sample_rate, target_sr=16000)
+
+    return audio.astype(np.float32)
+
+
+def transcribe(audio_path: str) -> Iterator[Segment]:
     resp = minio_client.get_object("bronze", audio_path)
     try:
         audio_data = resp.read()
-        file = io.BytesIO(audio_data)
+        dec_data = decode_audio(audio_data)
 
+        segments, info = model.transcribe(dec_data, language="en")
+        yield from segments
     finally:
         resp.close()
         resp.release_conn()
-
-    # Decode audio bytes into numpy array for Whisper
-    audio_np, _ = sf.read
-
-    return "This is a transcription"
 
 
 def split_into_sections(xml_content: str) -> list[str]:
@@ -92,7 +112,22 @@ def process_episode(xml_path: str, audio_path: str):
     conn.commit()
     cur.close()
     conn.close()
+
     print(f"Processed {len(sections)} sections for episode {episode_id}")
+
+    # transcribe
+    buffer = io.StringIO()
+    for segment in transcribe(audio_path):
+        buffer.write(f"[{segment.start:.1f}s -> {segment.end:.1f}s] {segment.text}\n")
+
+    encoded = buffer.getvalue().encode("utf-8")
+    minio_client.put_object(
+        "silver",
+        "example_transcription",
+        io.BytesIO(encoded),
+        length=len(encoded),
+        content_type="text/plain",
+    )
 
 
 if __name__ == "__main__":
