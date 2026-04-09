@@ -1,4 +1,5 @@
 # audio-lens
+[Meilenstein-Plan](https://www.notion.so/33d621dfadf7805caef5e1b62101ce35?v=33d621dfadf780b3bac6000cba9df55f&pvs=32)
 
 ## Current Build (Mock / Proof of Concept)
 
