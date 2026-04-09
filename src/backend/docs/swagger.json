@@ -1,0 +1,166 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "Social Listening tool for podcasts and media.",
+        "title": "Media-Lens API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/api/v1",
+    "paths": {
+        "/health": {
+            "get": {
+                "description": "Get the health status of the API",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Health check",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/podcasts": {
+            "get": {
+                "description": "Get a list of all podcasts that are currently being tracked.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "podcasts"
+                ],
+                "summary": "List all podcasts",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.Podcast"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Provide an RSS URL to start tracking a new podcast.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "podcasts"
+                ],
+                "summary": "Add a new podcast",
+                "parameters": [
+                    {
+                        "description": "Podcast to add",
+                        "name": "podcast",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.Podcast"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/model.Podcast"
+                        }
+                    }
+                }
+            }
+        },
+        "/search": {
+            "get": {
+                "description": "Search all transcribed episodes for a specific keyword or phrase.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "search"
+                ],
+                "summary": "Search through transcripts",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Search query",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.SearchResult"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "model.Podcast": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string",
+                    "example": "A podcast about the Go programming language."
+                },
+                "id": {
+                    "type": "string",
+                    "example": "p1"
+                },
+                "rss_url": {
+                    "type": "string",
+                    "example": "https://example.com/rss"
+                },
+                "title": {
+                    "type": "string",
+                    "example": "The Go Programming Podcast"
+                }
+            }
+        },
+        "model.SearchResult": {
+            "type": "object",
+            "properties": {
+                "episode_id": {
+                    "type": "string",
+                    "example": "e1"
+                },
+                "score": {
+                    "type": "number",
+                    "example": 0.95
+                },
+                "snippet": {
+                    "type": "string",
+                    "example": "...and that's how you use Gin for routing..."
+                }
+            }
+        }
+    }
+}

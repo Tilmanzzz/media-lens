@@ -1,0 +1,111 @@
+basePath: /api/v1
+definitions:
+  model.Podcast:
+    properties:
+      created_at:
+        type: string
+      description:
+        example: A podcast about the Go programming language.
+        type: string
+      id:
+        example: p1
+        type: string
+      rss_url:
+        example: https://example.com/rss
+        type: string
+      title:
+        example: The Go Programming Podcast
+        type: string
+    type: object
+  model.SearchResult:
+    properties:
+      episode_id:
+        example: e1
+        type: string
+      score:
+        example: 0.95
+        type: number
+      snippet:
+        example: '...and that''s how you use Gin for routing...'
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: Social Listening tool for podcasts and media.
+  title: Media-Lens API
+  version: "1.0"
+paths:
+  /health:
+    get:
+      description: Get the health status of the API
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Health check
+      tags:
+      - health
+  /podcasts:
+    get:
+      description: Get a list of all podcasts that are currently being tracked.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.Podcast'
+            type: array
+      summary: List all podcasts
+      tags:
+      - podcasts
+    post:
+      consumes:
+      - application/json
+      description: Provide an RSS URL to start tracking a new podcast.
+      parameters:
+      - description: Podcast to add
+        in: body
+        name: podcast
+        required: true
+        schema:
+          $ref: '#/definitions/model.Podcast'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.Podcast'
+      summary: Add a new podcast
+      tags:
+      - podcasts
+  /search:
+    get:
+      description: Search all transcribed episodes for a specific keyword or phrase.
+      parameters:
+      - description: Search query
+        in: query
+        name: q
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.SearchResult'
+            type: array
+      summary: Search through transcripts
+      tags:
+      - search
+swagger: "2.0"
