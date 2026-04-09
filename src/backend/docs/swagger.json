@@ -9,9 +9,184 @@
     "host": "localhost:8080",
     "basePath": "/api/v1",
     "paths": {
+        "/audio-url/{id}": {
+            "get": {
+                "description": "Generate a presigned MinIO URL for streaming an episode's audio file.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "audio"
+                ],
+                "summary": "Get a presigned audio URL",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Episode ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.AudioURLResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/episodes": {
+            "get": {
+                "description": "Get episodes, optionally filtered by podcast_id.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "episodes"
+                ],
+                "summary": "List episodes",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by podcast ID",
+                        "name": "podcast_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.Episode"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/episodes/{id}": {
+            "get": {
+                "description": "Retrieve an episode and all its podcast sections by episode ID.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "episodes"
+                ],
+                "summary": "Get a single episode with its sections",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Episode ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.EpisodeWithSections"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/episodes/{id}/sections": {
+            "get": {
+                "description": "Retrieve all podcast sections for a given episode ID.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sections"
+                ],
+                "summary": "Get sections for an episode",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Episode ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.PodcastSection"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/health": {
             "get": {
-                "description": "Get the health status of the API",
+                "description": "Get the health status of the API, including database and MinIO connectivity.",
                 "produces": [
                     "application/json"
                 ],
@@ -23,10 +198,13 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/model.HealthStatus"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/model.HealthStatus"
                         }
                     }
                 }
@@ -34,7 +212,7 @@
         },
         "/podcasts": {
             "get": {
-                "description": "Get a list of all podcasts that are currently being tracked.",
+                "description": "Get a list of distinct podcasts with episode counts.",
                 "produces": [
                     "application/json"
                 ],
@@ -48,40 +226,17 @@
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/model.Podcast"
+                                "$ref": "#/definitions/model.PodcastSummary"
                             }
                         }
-                    }
-                }
-            },
-            "post": {
-                "description": "Provide an RSS URL to start tracking a new podcast.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "podcasts"
-                ],
-                "summary": "Add a new podcast",
-                "parameters": [
-                    {
-                        "description": "Podcast to add",
-                        "name": "podcast",
-                        "in": "body",
-                        "required": true,
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/model.Podcast"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/model.Podcast"
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     }
                 }
@@ -89,14 +244,14 @@
         },
         "/search": {
             "get": {
-                "description": "Search all transcribed episodes for a specific keyword or phrase.",
+                "description": "Search all podcast sections for a keyword or phrase using ILIKE.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "search"
                 ],
-                "summary": "Search through transcripts",
+                "summary": "Search through section text",
                 "parameters": [
                     {
                         "type": "string",
@@ -104,6 +259,12 @@
                         "name": "q",
                         "in": "query",
                         "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results (default 20, max 100)",
+                        "name": "limit",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -115,33 +276,160 @@
                                 "$ref": "#/definitions/model.SearchResult"
                             }
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
                     }
                 }
             }
         }
     },
     "definitions": {
-        "model.Podcast": {
+        "model.AudioURLResponse": {
             "type": "object",
             "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "description": {
+                "expires_in": {
                     "type": "string",
-                    "example": "A podcast about the Go programming language."
+                    "example": "1h"
+                },
+                "url": {
+                    "type": "string",
+                    "example": "https://minio:9000/bronze/audio/...?X-Amz-Signature=..."
+                }
+            }
+        },
+        "model.Episode": {
+            "type": "object",
+            "properties": {
+                "audio_path": {
+                    "type": "string",
+                    "example": "bronze/audio/abc/def/original.mp3"
                 },
                 "id": {
                     "type": "string",
-                    "example": "p1"
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
                 },
-                "rss_url": {
+                "ingested_at": {
+                    "type": "string"
+                },
+                "podcast_id": {
                     "type": "string",
-                    "example": "https://example.com/rss"
+                    "example": "the-daily"
+                },
+                "published_at": {
+                    "type": "string",
+                    "example": "2026-04-07T00:00:00Z"
                 },
                 "title": {
                     "type": "string",
-                    "example": "The Go Programming Podcast"
+                    "example": "The Daily - Monday, April 7"
+                },
+                "xml_path": {
+                    "type": "string",
+                    "example": "bronze/podcasts/ep123.xml"
+                }
+            }
+        },
+        "model.EpisodeWithSections": {
+            "type": "object",
+            "properties": {
+                "episode": {
+                    "$ref": "#/definitions/model.Episode"
+                },
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.PodcastSection"
+                    }
+                }
+            }
+        },
+        "model.HealthStatus": {
+            "type": "object",
+            "properties": {
+                "database": {
+                    "type": "string",
+                    "example": "UP"
+                },
+                "minio": {
+                    "type": "string",
+                    "example": "UP"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "UP"
+                }
+            }
+        },
+        "model.PodcastSection": {
+            "type": "object",
+            "properties": {
+                "episode_id": {
+                    "type": "string",
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "660e8400-e29b-41d4-a716-446655440000"
+                },
+                "processed_at": {
+                    "type": "string"
+                },
+                "section_idx": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "sentiment": {
+                    "type": "string",
+                    "example": "neutral"
+                },
+                "sentiment_score": {
+                    "type": "number",
+                    "example": 0.5
+                },
+                "text": {
+                    "type": "string",
+                    "example": "Today we discuss..."
+                },
+                "topics": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "unknown"
+                    ]
+                }
+            }
+        },
+        "model.PodcastSummary": {
+            "type": "object",
+            "properties": {
+                "episode_count": {
+                    "type": "integer",
+                    "example": 42
+                },
+                "latest_episode": {
+                    "type": "string"
+                },
+                "podcast_id": {
+                    "type": "string",
+                    "example": "the-daily"
                 }
             }
         },
@@ -150,15 +438,27 @@
             "properties": {
                 "episode_id": {
                     "type": "string",
-                    "example": "e1"
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
+                },
+                "episode_title": {
+                    "type": "string",
+                    "example": "The Daily - Monday, April 7"
                 },
                 "score": {
                     "type": "number",
                     "example": 0.95
                 },
+                "section_idx": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "sentiment": {
+                    "type": "string",
+                    "example": "neutral"
+                },
                 "snippet": {
                     "type": "string",
-                    "example": "...and that's how you use Gin for routing..."
+                    "example": "...match found in the transcript..."
                 }
             }
         }

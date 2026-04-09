@@ -1,32 +1,117 @@
 basePath: /api/v1
 definitions:
-  model.Podcast:
+  model.AudioURLResponse:
     properties:
-      created_at:
+      expires_in:
+        example: 1h
         type: string
-      description:
-        example: A podcast about the Go programming language.
+      url:
+        example: https://minio:9000/bronze/audio/...?X-Amz-Signature=...
+        type: string
+    type: object
+  model.Episode:
+    properties:
+      audio_path:
+        example: bronze/audio/abc/def/original.mp3
         type: string
       id:
-        example: p1
+        example: 550e8400-e29b-41d4-a716-446655440000
         type: string
-      rss_url:
-        example: https://example.com/rss
+      ingested_at:
+        type: string
+      podcast_id:
+        example: the-daily
+        type: string
+      published_at:
+        example: "2026-04-07T00:00:00Z"
         type: string
       title:
-        example: The Go Programming Podcast
+        example: The Daily - Monday, April 7
+        type: string
+      xml_path:
+        example: bronze/podcasts/ep123.xml
+        type: string
+    type: object
+  model.EpisodeWithSections:
+    properties:
+      episode:
+        $ref: '#/definitions/model.Episode'
+      sections:
+        items:
+          $ref: '#/definitions/model.PodcastSection'
+        type: array
+    type: object
+  model.HealthStatus:
+    properties:
+      database:
+        example: UP
+        type: string
+      minio:
+        example: UP
+        type: string
+      status:
+        example: UP
+        type: string
+    type: object
+  model.PodcastSection:
+    properties:
+      episode_id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      id:
+        example: 660e8400-e29b-41d4-a716-446655440000
+        type: string
+      processed_at:
+        type: string
+      section_idx:
+        example: 1
+        type: integer
+      sentiment:
+        example: neutral
+        type: string
+      sentiment_score:
+        example: 0.5
+        type: number
+      text:
+        example: Today we discuss...
+        type: string
+      topics:
+        example:
+        - unknown
+        items:
+          type: string
+        type: array
+    type: object
+  model.PodcastSummary:
+    properties:
+      episode_count:
+        example: 42
+        type: integer
+      latest_episode:
+        type: string
+      podcast_id:
+        example: the-daily
         type: string
     type: object
   model.SearchResult:
     properties:
       episode_id:
-        example: e1
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      episode_title:
+        example: The Daily - Monday, April 7
         type: string
       score:
         example: 0.95
         type: number
+      section_idx:
+        example: 2
+        type: integer
+      sentiment:
+        example: neutral
+        type: string
       snippet:
-        example: '...and that''s how you use Gin for routing...'
+        example: '...match found in the transcript...'
         type: string
     type: object
 host: localhost:8080
@@ -36,24 +121,46 @@ info:
   title: Media-Lens API
   version: "1.0"
 paths:
-  /health:
+  /audio-url/{id}:
     get:
-      description: Get the health status of the API
+      description: Generate a presigned MinIO URL for streaming an episode's audio
+        file.
+      parameters:
+      - description: Episode ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
+            $ref: '#/definitions/model.AudioURLResponse'
+        "404":
+          description: Not Found
+          schema:
             additionalProperties:
               type: string
             type: object
-      summary: Health check
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a presigned audio URL
       tags:
-      - health
-  /podcasts:
+      - audio
+  /episodes:
     get:
-      description: Get a list of all podcasts that are currently being tracked.
+      description: Get episodes, optionally filtered by podcast_id.
+      parameters:
+      - description: Filter by podcast ID
+        in: query
+        name: podcast_id
+        type: string
       produces:
       - application/json
       responses:
@@ -61,39 +168,55 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/model.Podcast'
+              $ref: '#/definitions/model.Episode'
             type: array
-      summary: List all podcasts
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List episodes
       tags:
-      - podcasts
-    post:
-      consumes:
-      - application/json
-      description: Provide an RSS URL to start tracking a new podcast.
+      - episodes
+  /episodes/{id}:
+    get:
+      description: Retrieve an episode and all its podcast sections by episode ID.
       parameters:
-      - description: Podcast to add
-        in: body
-        name: podcast
+      - description: Episode ID (UUID)
+        in: path
+        name: id
         required: true
-        schema:
-          $ref: '#/definitions/model.Podcast'
+        type: string
       produces:
       - application/json
       responses:
-        "201":
-          description: Created
+        "200":
+          description: OK
           schema:
-            $ref: '#/definitions/model.Podcast'
-      summary: Add a new podcast
+            $ref: '#/definitions/model.EpisodeWithSections'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a single episode with its sections
       tags:
-      - podcasts
-  /search:
+      - episodes
+  /episodes/{id}/sections:
     get:
-      description: Search all transcribed episodes for a specific keyword or phrase.
+      description: Retrieve all podcast sections for a given episode ID.
       parameters:
-      - description: Search query
-        in: query
-        name: q
+      - description: Episode ID (UUID)
+        in: path
+        name: id
         required: true
         type: string
       produces:
@@ -103,9 +226,91 @@ paths:
           description: OK
           schema:
             items:
+              $ref: '#/definitions/model.PodcastSection'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get sections for an episode
+      tags:
+      - sections
+  /health:
+    get:
+      description: Get the health status of the API, including database and MinIO
+        connectivity.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.HealthStatus'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/model.HealthStatus'
+      summary: Health check
+      tags:
+      - health
+  /podcasts:
+    get:
+      description: Get a list of distinct podcasts with episode counts.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.PodcastSummary'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all podcasts
+      tags:
+      - podcasts
+  /search:
+    get:
+      description: Search all podcast sections for a keyword or phrase using ILIKE.
+      parameters:
+      - description: Search query
+        in: query
+        name: q
+        required: true
+        type: string
+      - description: Max results (default 20, max 100)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
               $ref: '#/definitions/model.SearchResult'
             type: array
-      summary: Search through transcripts
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Search through section text
       tags:
       - search
 swagger: "2.0"
