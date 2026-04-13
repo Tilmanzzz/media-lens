@@ -1,4 +1,7 @@
 services:
+  # after db schema change make sure to use
+  #   docker compose down postgres -v
+  #   docker compose up postgres --build --force-recreate
   postgres:
     image: postgres:16
     environment:
@@ -9,7 +12,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql  # auto-runs on first start
+      - ./storage/db/init.sql:/docker-entrypoint-initdb.d/init.sql  # auto-runs on first start
 
   # postgres admin tool
   pgadmin:
@@ -17,10 +20,12 @@ services:
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@admin.com
       PGADMIN_DEFAULT_PASSWORD: admin
+      
     ports:
       - "5050:80"
     volumes:
-      - ./db/pgadmin/servers.json:/pgadmin4/servers.json
+      - ./storage/db/pgadmin/servers.json:/pgadmin4/servers.json
+      - pgadmin_data:/var/lib/pgadmin
     depends_on:
       - postgres
 
@@ -88,3 +93,4 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  pgadmin_data:
