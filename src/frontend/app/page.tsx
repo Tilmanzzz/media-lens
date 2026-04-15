@@ -1,12 +1,21 @@
-import { foundPodcast } from "@/lib/dummyData"; 
-import { DeepDiveCard } from "@/components/ui/card";
+"use client";
+
+import { foundPodcast } from "@/lib/dummyData";
+import { InfoCard } from "@/components/ui/card";
+import { useState } from "react";
+import { SearchBar } from "@/components/layout/searchbar";
+
 
 export default function HomePage() {
+  const [search, setSearch] = useState("");
   return (
-    <div className="mx-auto max-w-6xl">
+    <div className="mx-auto max-w-7xl">
       <header className="mb-8">
-        <h1 className="text-3xl font-bold"> Discover Podcasts</h1>
-        <p className="mt-2 text-sm text-white/60">
+         <div className="mt-3">
+            <SearchBar value={search} onChange={setSearch} />
+          </div>
+        <h1 className=" mt-10 text-3xl font-bold text-foreground">Discover Podcasts</h1>
+        <p className="mt-2 text-sm text-foreground-muted">
           {foundPodcast?.length ?? 0} Podcasts gefunden
         </p>
       </header>
@@ -14,15 +23,7 @@ export default function HomePage() {
       <section>
         <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {foundPodcast.map((item) => (
-            <DeepDiveCard
-              key={item.id}
-              title={item.title}
-              description={item.description}
-              image={item.image}
-              href={item.href}
-              badge={item.badge}
-              duration={item.duration}
-            />
+            <InfoCard key={item.id} {...item} />
           ))}
         </div>
       </section>

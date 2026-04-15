@@ -1,54 +1,53 @@
-// components/deep-dive-card.tsx
 import Image from "next/image";
 
-type DeepDiveCardProps = {
-  title: string;
+type InfoCardProps = {
+  episodeNr: number;
+  titleEpi: string;
   description: string;
+  titlePodcast: string;
   image: string;
   href: string;
   badge?: string;
   duration?: string;
+  date: string;
 };
 
-export function DeepDiveCard({
-  title,
+export function InfoCard({
+  episodeNr,
+  titleEpi,
   description,
+  titlePodcast,
   image,
   href,
   badge,
   duration,
-}: DeepDiveCardProps) {
+  date
+}: InfoCardProps) {
   return (
     <a
       href={href}
-      className="group block overflow-hidden rounded-2xl bg-[var(--background-card)] transition hover:scale-[1.02] hover:bg-white/5"
+      className="group block overflow-hidden rounded-2xl border border-border bg-background-card transition duration-200 hover:-translate-y-0.5 hover:bg-background-raised hover:border-border-strong"
     >
-      {/* Bild mit fester Höhe */}
-      <div className="relative h-[160px] w-full">
-        <Image
-          src={image}
-          alt={title}
-          fill
-          className="object-cover"
-        />
+      <div className="relative h-[170px] w-full">
+        <Image src={image} alt={titleEpi} fill className="object-cover" />
       </div>
 
-      {/* Text */}
       <div className="p-4">
-        {badge && (
-          <span className="mb-2 inline-block rounded-full bg-[var(--accent)] px-2 py-0.5 text-xs font-medium text-black">
-            {badge}
-          </span>
-        )}
-        <h3 className="text-lg font-semibold">{title}</h3>
-        <p className="mt-1 line-clamp-2 text-sm text-white/60">
+        <p className=" mt-1 text-xs text-foreground-subtle">Episode {episodeNr} - {titlePodcast}</p>
+        <h3 className=" mt-1 text-xl font-semibold text-foreground">{titleEpi}</h3>
+        <p className="mt-2 line-clamp-2 text-sm text-foreground-muted">
           {description}
         </p>
-        {duration && (
-          <p className="mt-3 text-xs text-white/40">
-            {duration}
-          </p>
-        )}
+        <div className="flex mt-3 items-center justify-between text-sm text-foreground-muted">
+            {badge && (
+            <span className="mb-2 inline-flex rounded-full bg-primary-muted px-2.5 py-1 text-xs font-medium text-primary">
+                {badge}
+            </span>
+            )}
+            {duration && (
+            <p className="mt-3 text-xs text-foreground-subtle">{duration}</p>
+            )}
+        </div>
       </div>
     </a>
   );

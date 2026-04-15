@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Courier_Prime , DM_Sans } from "next/font/google";
+import { Courier_Prime, DM_Sans } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/layout/sidebar";
 
@@ -23,13 +23,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className="h-full antialiased"
-    >
-      <body className={`${courierPrime.className} ${dmSans.className} min-h-screen bg-[var(--background)] text-[var(--foreground)]`}>
+    <html lang="en" className="h-full antialiased">
+      <body
+        className={`${courierPrime.className} ${dmSans.className} min-h-screen bg-background text-foreground`}
+      >
         <Sidebar />
-        <main className="ml-[240px] min-h-screen p-6">
+        <main className="ml-[240px] min-h-screen bg-background px-6 py-6">
           {children}
         </main>
       </body>
