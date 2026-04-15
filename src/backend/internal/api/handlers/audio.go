@@ -16,30 +16,30 @@ import (
 // @Produce      json
 // @Param        id   path      string  true  "Episode ID (UUID)"
 // @Success      200  {object}  model.AudioURLResponse
-// @Failure      404  {object}  map[string]string
-// @Failure      500  {object}  map[string]string
+// @Failure      404  {object}  model.ApiError
+// @Failure      500  {object}  model.ApiError
 // @Router       /audio-url/{id} [get]
 func (h *Handler) GetAudioURL(c *gin.Context) {
 	id := c.Param("id")
 
 	episode, err := h.Episodes.GetByID(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 	if episode == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "episode not found"})
+		respondError(c, http.StatusNotFound, "episode_not_found", "Episode mit dieser ID existiert nicht.")
 		return
 	}
 	if episode.AudioPath == "" {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no audio file available for this episode"})
+		respondError(c, http.StatusNotFound, "audio_not_found", "No audio file available for this episode.")
 		return
 	}
 
 	expiry := 1 * time.Hour
 	presignedURL, err := storage.GeneratePresignedURL(c.Request.Context(), h.Minio, h.Config.MinioBucket, episode.AudioPath, expiry)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate audio URL"})
+		respondError(c, http.StatusInternalServerError, "presign_failed", "Failed to generate audio URL.")
 		return
 	}
 

@@ -1,16 +1,29 @@
-# Media-Lens Backend
+# Audiolens Backend
 
-Go REST API built with **Gin** + **Swagger**. Serves podcast metadata from PostgreSQL and audio streaming via MinIO presigned URLs.
+Go REST API built with **Gin** + **Swagger**. Serves podcast episode data, topics, transcripts, fact-checks, and chat from PostgreSQL. Audio and cover images are served via MinIO presigned URLs.
 
 ## Endpoints
+
+### Contract Endpoints (from `api-contracts.yml`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/episodes` | Episode list — cursor pagination, free-text search (`?q=`, `?cursor=`, `?limit=`) |
+| GET | `/api/v1/episodes/:id` | Episode detail (header area above tabs) |
+| GET | `/api/v1/episodes/:id/topics` | Topics tab — returns 202 if analysis not ready |
+| GET | `/api/v1/episodes/:id/transcript` | Transcript lines with `has_fact_flag` annotation |
+| GET | `/api/v1/episodes/:id/fact-checks` | Fact-check claims for the sidebar |
+| POST | `/api/v1/chat/conversations` | Create a new chat session |
+| POST | `/api/v1/chat/conversations/:id/messages` | Send message — NDJSON streaming response (stubbed) |
+| GET | `/api/v1/episodes/:id/sync` | SSE playback sync (stubbed) |
+
+### Additional Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/health` | Health check (DB + MinIO) |
 | GET | `/api/v1/podcasts` | List distinct podcasts with episode counts |
-| GET | `/api/v1/episodes` | List episodes (`?podcast_id=` optional) |
-| GET | `/api/v1/episodes/:id` | Episode details + sections |
-| GET | `/api/v1/episodes/:id/sections` | Sections with sentiment & topics |
+| GET | `/api/v1/episodes/:id/sections` | Podcast sections with sentiment & topics |
 | GET | `/api/v1/search?q=` | Text search across sections (`&limit=` optional) |
 | GET | `/api/v1/audio-url/:id` | Presigned MinIO URL for audio streaming |
 
@@ -25,8 +38,16 @@ internal/
 ├── database/                # PostgreSQL connection pool
 ├── storage/                 # MinIO client + presigned URLs
 ├── repository/              # Data access layer (interfaces + Postgres impl)
-├── model/                   # Data models (aligned to DB schema)
+├── model/                   # Data models (DB + API contract schemas)
 └── api/handlers/            # HTTP handlers
+    ├── podcasts.go          # Episode list, detail, sections, search, podcasts
+    ├── topics.go            # Topics tab
+    ├── transcript.go        # Transcript tab
+    ├── factchecks.go        # Fact-check sidebar
+    ├── chat.go              # Chat session + NDJSON streaming
+    ├── sync.go              # SSE playback sync
+    ├── audio.go             # Presigned audio URLs
+    └── health.go            # Health check
 ```
 
 ## Run

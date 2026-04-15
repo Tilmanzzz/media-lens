@@ -19,17 +19,20 @@ CREATE TABLE pipeline_runs (
 
 
 CREATE TABLE episodes (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  batch_id        UUID REFERENCES pipeline_runs(id),
-  title           TEXT NOT NULL,
-  podcast_id      TEXT,
-  published_at    TIMESTAMPTZ,
-  audio_path      TEXT,
-  xml_path        TEXT,
-  transcript_path TEXT,
-  status          episode_status NOT NULL DEFAULT 'pending',
-  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  ingested_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  batch_id         UUID REFERENCES pipeline_runs(id),
+  title            TEXT NOT NULL,
+  podcast_id       TEXT,
+  podcast_name     TEXT,
+  published_at     TIMESTAMPTZ,
+  duration_seconds INTEGER,
+  audio_path       TEXT,
+  xml_path         TEXT,
+  transcript_path  TEXT,
+  cover_path       TEXT,
+  status           episode_status NOT NULL DEFAULT 'pending',
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  ingested_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 
@@ -47,6 +50,53 @@ CREATE TABLE podcast_sections (
 CREATE INDEX idx_sections_episode_id ON podcast_sections(episode_id);
 CREATE INDEX idx_episodes_batch_id ON episodes(batch_id);
 CREATE INDEX idx_episodes_status ON episodes(status);
+
+
+CREATE TYPE emotion_label AS ENUM ('positive', 'neutral', 'negative');
+CREATE TYPE fact_verdict AS ENUM ('TRUE', 'MOSTLY_TRUE', 'MISLEADING', 'FALSE', 'UNVERIFIABLE');
+
+CREATE TABLE topics (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  episode_id  UUID NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+  topic       TEXT NOT NULL,
+  start_time  INTEGER NOT NULL,
+  emotion     emotion_label NOT NULL DEFAULT 'neutral',
+  summary     TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_topics_episode_id ON topics(episode_id);
+
+CREATE TABLE transcript_lines (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  episode_id  UUID NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+  start_time  INTEGER NOT NULL,
+  text        TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_transcript_lines_episode_id ON transcript_lines(episode_id);
+
+CREATE TABLE fact_checks (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  episode_id  UUID NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+  start_time  INTEGER NOT NULL,
+  claim       TEXT NOT NULL,
+  verdict     fact_verdict NOT NULL DEFAULT 'UNVERIFIABLE',
+  explanation TEXT,
+  sources     TEXT[],
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_fact_checks_episode_id ON fact_checks(episode_id);
+
+CREATE TABLE conversations (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  episode_id  UUID NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_conversations_episode_id ON conversations(episode_id);
 
 
 

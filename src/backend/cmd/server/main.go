@@ -56,14 +56,22 @@ func main() {
 	// Create repositories
 	episodeRepo := repository.NewEpisodeRepository(db)
 	sectionRepo := repository.NewSectionRepository(db)
+	topicRepo := repository.NewTopicRepository(db)
+	transcriptRepo := repository.NewTranscriptRepository(db)
+	factCheckRepo := repository.NewFactCheckRepository(db)
+	conversationRepo := repository.NewConversationRepository(db)
 
 	// Create handler with dependencies
 	h := &handlers.Handler{
-		Episodes: episodeRepo,
-		Sections: sectionRepo,
-		Minio:    minioClient,
-		Config:   cfg,
-		DB:       db,
+		Episodes:      episodeRepo,
+		Sections:      sectionRepo,
+		Topics:        topicRepo,
+		Transcripts:   transcriptRepo,
+		FactChecks:    factCheckRepo,
+		Conversations: conversationRepo,
+		Minio:         minioClient,
+		Config:        cfg,
+		DB:            db,
 	}
 
 	r := gin.Default()
@@ -83,15 +91,23 @@ func main() {
 	{
 		v1.GET("/health", h.HealthCheck)
 
+		// Legacy endpoints
 		v1.GET("/podcasts", h.ListPodcasts)
+		v1.GET("/search", h.SearchTranscripts)
+		v1.GET("/audio-url/:id", h.GetAudioURL)
 
+		// Contract endpoints
 		v1.GET("/episodes", h.ListEpisodes)
 		v1.GET("/episodes/:id", h.GetEpisode)
 		v1.GET("/episodes/:id/sections", h.GetEpisodeSections)
+		v1.GET("/episodes/:id/topics", h.GetTopics)
+		v1.GET("/episodes/:id/transcript", h.GetTranscript)
+		v1.GET("/episodes/:id/fact-checks", h.GetFactChecks)
+		v1.GET("/episodes/:id/sync", h.SyncPlayback)
 
-		v1.GET("/search", h.SearchTranscripts)
-
-		v1.GET("/audio-url/:id", h.GetAudioURL)
+		// Chat
+		v1.POST("/chat/conversations", h.CreateConversation)
+		v1.POST("/chat/conversations/:id/messages", h.SendMessage)
 	}
 
 	// Swagger UI
