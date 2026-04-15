@@ -1,28 +1,44 @@
-import { House, Search, AudioLines } from 'lucide-react';
-
+import Link from 'next/link'
+import { House, Search, AudioLines } from 'lucide-react'
 
 export function Sidebar() {
   return (
-    <div
-      style={{ background: 'var(--background-card)', color: 'var(--foreground)' }}
-      className="fixed top-0 left-0 h-screen z-30"
+    <aside
+      className="fixed left-0 top-0 h-screen w-[240px] bg-[var(--background-card)] text-[var(--foreground)] border-r border-white/10"
     >
-      <div className="flex flex-col items-start w-50">
-          <div className="ml-10 mt-5 flex items-center gap-3" > 
-             <AudioLines color="var(--accent)" size={30}></AudioLines>
-              <h3 style={{color:'var(--accent)'}}>Media Lens</h3>
-          </div>
-        <div className="ml-15 mt-15 flex items-center gap-3">
-          <House size={20} />
-          <a href="#" className="sidebar-link">Home</a>
+      <div className="flex h-full flex-col px-6 py-5">
+        {/* Logo / Titel */}
+        <div className="mb-10 flex items-center gap-3">
+          <AudioLines size={40} color="var(--accent)" aria-hidden="true" />
+          <h3 className="text-xl font-semibold text-[var(--accent)]">
+            Media Lens
+          </h3>
         </div>
 
-        <div className="ml-15 mt-4 flex items-center gap-3">
-          <Search size={20} />
-          <a href="#" className="sidebar-link">Suche</a>
-        </div>
+        {/* Navigation */}
+        <nav className="flex flex-col gap-2">
+          <Link
+            href="/"
+            className="flex items-center gap-3 rounded-xl px-3 py-2 text-lg transition hover:bg-white/5 hover:text-[var(--accent)]"
+          >
+            <House size={24} aria-hidden="true" />
+            <span>Home</span>
+          </Link>
 
+          <Link
+            href="/search"
+            className="flex items-center gap-3 rounded-xl px-3 py-2 text-lg transition hover:bg-white/5 hover:text-[var(--accent)]"
+          >
+            <Search size={24} aria-hidden="true" />
+            <span>Suche</span>
+          </Link>
+        </nav>
+
+        {/* Optional: unten Profil o.ä. */}
+        <div className="mt-auto text-xs text-white/40">
+          © {new Date().getFullYear()} Media Lens
+        </div>
       </div>
-    </div>
+    </aside>
   )
 }

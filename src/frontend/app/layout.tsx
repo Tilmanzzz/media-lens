@@ -25,11 +25,13 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${courierPrime} ${dmSans} h-full antialiased`}
+      className="h-full antialiased"
     >
-      <body className="min-h-full flex flex-col">
-        <Sidebar></Sidebar>
-        <main>{children}</main>
+      <body className={`${courierPrime.className} ${dmSans.className} min-h-screen bg-[var(--background)] text-[var(--foreground)]`}>
+        <Sidebar />
+        <main className="ml-[240px] min-h-screen p-6">
+          {children}
+        </main>
       </body>
     </html>
   );
