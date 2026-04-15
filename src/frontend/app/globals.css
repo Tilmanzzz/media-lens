@@ -1,26 +1,96 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+
+  --background:        #0B0F1A;   /* Deep Void — Haupt-Hintergrund */
+  --background-panel:  #111827;   /* Panels, Navbar, Footer */
+  --background-card:   #1c2740;   /* Cards, Sidebar, Player-Bar */
+  --background-raised: #243352;   /* Hover-States, erhöhte Elemente */
+
+
+  --foreground:        #E8F0FF;   /* Primärtext auf dunklem Grund */
+  --foreground-muted:  #7BA8FF;   /* Sekundärtext, Icons, Subtitles */
+  --foreground-subtle: #4A6080;   /* Placeholder, deaktiviert */
+
+
+  --primary:           #4A7FE8;   /* Signal Blue — Buttons, Links, aktive States */
+  --primary-hover:     #6294ED;   /* Signal Blue hover */
+  --primary-muted:     #1C3A6E;   /* Signal Blue dezent (Badges, Backgrounds) */
+
+  --accent:            #00E5C4;   /* Pulse Cyan — Highlights, Branding, Waveform */
+  --accent-hover:      #00C9AC;   /* Pulse Cyan hover */
+  --accent-muted:      #003D35;   /* Pulse Cyan dezent (Tag-Backgrounds) */
+
+
+  --success:           #3B6D11;   /* Gut belegt (Fact score > 80) */
+  --success-bg:        #1A2E0A;
+  --warning:           #BA7517;   /*  (Fact score < 30) */
+  --warning-bg:        #2E1E04;
+  --danger:            #993C1D;   /* Negatives Sentiment */
+  --danger-bg:         #2A1008;
+
+
+  --border:            rgba(74, 127, 232, 0.15);   /* Standard */
+  --border-strong:     rgba(74, 127, 232, 0.30);   /* Hover, Fokus */
+  --border-accent:     rgba(0, 229, 196, 0.30);    /* Cyan-akzentuiert */
+
+
+  --secondary:         #1C2740;
+  --signal:            #4A7FE8;
+  --cyan:              #00E5C4;
+  --wave:              #7BA8FF;
+  --light:             #E8F0FF;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-background:        var(--background);
+  --color-background-panel:  var(--background-panel);
+  --color-background-card:   var(--background-card);
+  --color-background-raised: var(--background-raised);
+
+  --color-foreground:        var(--foreground);
+  --color-foreground-muted:  var(--foreground-muted);
+  --color-foreground-subtle: var(--foreground-subtle);
+
+  --color-primary:           var(--primary);
+  --color-primary-hover:     var(--primary-hover);
+  --color-primary-muted:     var(--primary-muted);
+
+  --color-accent:            var(--accent);
+  --color-accent-hover:      var(--accent-hover);
+  --color-accent-muted:      var(--accent-muted);
+
+  --color-success:           var(--success);
+  --color-success-bg:        var(--success-bg);
+  --color-warning:           var(--warning);
+  --color-warning-bg:        var(--warning-bg);
+  --color-danger:            var(--danger);
+  --color-danger-bg:         var(--danger-bg);
+
+  --color-border:            var(--border);
+  --color-border-strong:     var(--border-strong);
+  --color-border-accent:     var(--border-accent);
 }
 
-@media (prefers-color-scheme: dark) {
+
+@media (prefers-color-scheme: light) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background:        #F5F7FF;
+    --background-panel:  #FFFFFF;
+    --background-card:   #EDF1FB;
+    --background-raised: #E2E9F8;
+
+    --foreground:        #0B0F1A;
+    --foreground-muted:  #2D4A8A;
+    --foreground-subtle: #7BA8FF;
+
+    --border:            rgba(28, 39, 64, 0.12);
+    --border-strong:     rgba(28, 39, 64, 0.25);
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
 }
+
