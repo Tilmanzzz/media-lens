@@ -15,7 +15,7 @@ export default function HomePage() {
             <SearchBar value={search} onChange={setSearch} />
           </div>
         <h1 className=" mt-10 text-3xl font-bold text-foreground">Discover Podcasts</h1>
-        <p className="mt-2 text-sm text-foreground-muted">
+        <p className="mt-2 text-sm text-foreground">
           {foundPodcast?.length ?? 0} Podcasts gefunden
         </p>
       </header>
