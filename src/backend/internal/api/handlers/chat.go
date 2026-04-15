@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -27,20 +26,14 @@ func (h *Handler) CreateConversation(c *gin.Context) {
 		return
 	}
 
-	// Verify episode exists
-	episode, err := h.Episodes.GetByID(c.Request.Context(), req.EpisodeID)
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
-		return
-	}
+	episode := h.getEpisodeOrAbort(c, req.EpisodeID)
 	if episode == nil {
-		respondError(c, http.StatusBadRequest, "episode_not_found", "Episode mit dieser ID existiert nicht.")
 		return
 	}
 
 	conversationID, err := h.Conversations.Create(c.Request.Context(), req.EpisodeID)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
+		respondInternalError(c, err)
 		return
 	}
 
@@ -72,7 +65,7 @@ func (h *Handler) SendMessage(c *gin.Context) {
 
 	exists, err := h.Conversations.Exists(c.Request.Context(), conversationID)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
+		respondInternalError(c, err)
 		return
 	}
 	if !exists {
@@ -102,14 +95,4 @@ func (h *Handler) SendMessage(c *gin.Context) {
 	done := model.ChatStreamChunk{Type: "done"}
 	_ = encoder.Encode(done)
 	c.Writer.(http.Flusher).Flush()
-}
-
-// writeNDJSON writes a single NDJSON line.
-func writeNDJSON(c *gin.Context, v interface{}) error {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(c.Writer, "%s\n", data)
-	return err
 }

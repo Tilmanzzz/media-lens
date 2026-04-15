@@ -17,21 +17,14 @@ import (
 // @Failure      404  {object}  model.ApiError
 // @Router       /episodes/{id}/fact-checks [get]
 func (h *Handler) GetFactChecks(c *gin.Context) {
-	episodeID := c.Param("id")
-
-	episode, err := h.Episodes.GetByID(c.Request.Context(), episodeID)
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
-		return
-	}
+	episode := h.getEpisodeOrAbort(c, c.Param("id"))
 	if episode == nil {
-		respondError(c, http.StatusNotFound, "episode_not_found", "Episode mit dieser ID existiert nicht.")
 		return
 	}
 
-	claims, err := h.FactChecks.ListByEpisodeID(c.Request.Context(), episodeID)
+	claims, err := h.FactChecks.ListByEpisodeID(c.Request.Context(), episode.ID)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
+		respondInternalError(c, err)
 		return
 	}
 	if claims == nil {
@@ -39,7 +32,7 @@ func (h *Handler) GetFactChecks(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, model.FactChecksResponse{
-		EpisodeID: episodeID,
+		EpisodeID: episode.ID,
 		Claims:    claims,
 	})
 }

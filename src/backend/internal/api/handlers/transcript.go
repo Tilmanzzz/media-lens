@@ -17,21 +17,14 @@ import (
 // @Failure      404  {object}  model.ApiError
 // @Router       /episodes/{id}/transcript [get]
 func (h *Handler) GetTranscript(c *gin.Context) {
-	episodeID := c.Param("id")
-
-	episode, err := h.Episodes.GetByID(c.Request.Context(), episodeID)
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
-		return
-	}
+	episode := h.getEpisodeOrAbort(c, c.Param("id"))
 	if episode == nil {
-		respondError(c, http.StatusNotFound, "episode_not_found", "Episode mit dieser ID existiert nicht.")
 		return
 	}
 
-	lines, err := h.Transcripts.ListByEpisodeID(c.Request.Context(), episodeID)
+	lines, err := h.Transcripts.ListByEpisodeID(c.Request.Context(), episode.ID)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
+		respondInternalError(c, err)
 		return
 	}
 	if lines == nil {
@@ -39,7 +32,7 @@ func (h *Handler) GetTranscript(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, model.TranscriptResponse{
-		EpisodeID: episodeID,
+		EpisodeID: episode.ID,
 		Lines:     lines,
 	})
 }

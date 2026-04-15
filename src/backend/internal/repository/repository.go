@@ -15,10 +15,7 @@ import (
 // --- Episode Repository ---
 
 type EpisodeRepository interface {
-	ListAll(ctx context.Context) ([]model.Episode, error)
 	GetByID(ctx context.Context, id string) (*model.Episode, error)
-	ListByPodcastID(ctx context.Context, podcastID string) ([]model.Episode, error)
-	ListDistinctPodcasts(ctx context.Context) ([]model.PodcastSummary, error)
 	ListPaginated(ctx context.Context, q string, cursor string, limit int) (episodes []model.Episode, total int, err error)
 }
 
@@ -28,23 +25,6 @@ type postgresEpisodeRepo struct {
 
 func NewEpisodeRepository(db *sql.DB) EpisodeRepository {
 	return &postgresEpisodeRepo{db: db}
-}
-
-func (r *postgresEpisodeRepo) ListAll(ctx context.Context) ([]model.Episode, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, title, COALESCE(podcast_id, ''), COALESCE(podcast_name, ''),
-		       published_at, duration_seconds,
-		       COALESCE(audio_path, ''), COALESCE(xml_path, ''),
-		       COALESCE(cover_path, ''), ingested_at
-		FROM episodes
-		ORDER BY ingested_at DESC
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("query episodes: %w", err)
-	}
-	defer rows.Close()
-
-	return scanEpisodes(rows)
 }
 
 func (r *postgresEpisodeRepo) GetByID(ctx context.Context, id string) (*model.Episode, error) {
@@ -67,47 +47,6 @@ func (r *postgresEpisodeRepo) GetByID(ctx context.Context, id string) (*model.Ep
 	return ep, nil
 }
 
-func (r *postgresEpisodeRepo) ListByPodcastID(ctx context.Context, podcastID string) ([]model.Episode, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, title, COALESCE(podcast_id, ''), COALESCE(podcast_name, ''),
-		       published_at, duration_seconds,
-		       COALESCE(audio_path, ''), COALESCE(xml_path, ''),
-		       COALESCE(cover_path, ''), ingested_at
-		FROM episodes
-		WHERE podcast_id = $1
-		ORDER BY ingested_at DESC
-	`, podcastID)
-	if err != nil {
-		return nil, fmt.Errorf("query episodes by podcast_id: %w", err)
-	}
-	defer rows.Close()
-
-	return scanEpisodes(rows)
-}
-
-func (r *postgresEpisodeRepo) ListDistinctPodcasts(ctx context.Context) ([]model.PodcastSummary, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT COALESCE(podcast_id, 'unknown'), COUNT(*), MAX(ingested_at)
-		FROM episodes
-		GROUP BY podcast_id
-		ORDER BY MAX(ingested_at) DESC
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("query distinct podcasts: %w", err)
-	}
-	defer rows.Close()
-
-	var summaries []model.PodcastSummary
-	for rows.Next() {
-		var s model.PodcastSummary
-		if err := rows.Scan(&s.PodcastID, &s.EpisodeCount, &s.LatestEpisode); err != nil {
-			return nil, fmt.Errorf("scan podcast summary: %w", err)
-		}
-		summaries = append(summaries, s)
-	}
-	return summaries, rows.Err()
-}
-
 // ListPaginated implements cursor-based pagination with optional free-text search.
 // Cursor encodes the ingested_at+id of the last seen row (base64).
 func (r *postgresEpisodeRepo) ListPaginated(ctx context.Context, q string, cursor string, limit int) ([]model.Episode, int, error) {
@@ -119,7 +58,6 @@ func (r *postgresEpisodeRepo) ListPaginated(ctx context.Context, q string, curso
 	var args []interface{}
 	argIdx := 1
 
-	// Free-text search on title and podcast_name
 	if q != "" {
 		pattern := "%" + q + "%"
 		whereClauses = append(whereClauses, fmt.Sprintf("(title ILIKE $%d OR COALESCE(podcast_name, '') ILIKE $%d)", argIdx, argIdx))
@@ -127,7 +65,6 @@ func (r *postgresEpisodeRepo) ListPaginated(ctx context.Context, q string, curso
 		argIdx++
 	}
 
-	// Cursor-based pagination: cursor is base64(ingested_at|id)
 	if cursor != "" {
 		decoded, err := base64.StdEncoding.DecodeString(cursor)
 		if err == nil {
@@ -146,14 +83,12 @@ func (r *postgresEpisodeRepo) ListPaginated(ctx context.Context, q string, curso
 		whereSQL = "WHERE " + strings.Join(whereClauses, " AND ")
 	}
 
-	// Count total matching rows
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM episodes %s", whereSQL)
 	var total int
 	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count episodes: %w", err)
 	}
 
-	// Fetch page
 	dataQuery := fmt.Sprintf(`
 		SELECT id, title, COALESCE(podcast_id, ''), COALESCE(podcast_name, ''),
 		       published_at, duration_seconds,
@@ -221,79 +156,6 @@ func scanEpisodes(rows *sql.Rows) ([]model.Episode, error) {
 	return episodes, rows.Err()
 }
 
-// --- Section Repository ---
-
-type SectionRepository interface {
-	ListByEpisodeID(ctx context.Context, episodeID string) ([]model.PodcastSection, error)
-	SearchText(ctx context.Context, query string, limit int) ([]model.SearchResult, error)
-}
-
-type postgresSectionRepo struct {
-	db *sql.DB
-}
-
-func NewSectionRepository(db *sql.DB) SectionRepository {
-	return &postgresSectionRepo{db: db}
-}
-
-func (r *postgresSectionRepo) ListByEpisodeID(ctx context.Context, episodeID string) ([]model.PodcastSection, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, episode_id, section_idx, COALESCE(text, ''),
-		       COALESCE(sentiment, ''), COALESCE(sentiment_score, 0),
-		       COALESCE(topics, '{}'), processed_at
-		FROM podcast_sections
-		WHERE episode_id = $1
-		ORDER BY section_idx ASC
-	`, episodeID)
-	if err != nil {
-		return nil, fmt.Errorf("query sections: %w", err)
-	}
-	defer rows.Close()
-
-	var sections []model.PodcastSection
-	for rows.Next() {
-		var s model.PodcastSection
-		if err := rows.Scan(&s.ID, &s.EpisodeID, &s.SectionIdx, &s.Text,
-			&s.Sentiment, &s.SentimentScore,
-			pq.Array(&s.Topics), &s.ProcessedAt); err != nil {
-			return nil, fmt.Errorf("scan section row: %w", err)
-		}
-		sections = append(sections, s)
-	}
-	return sections, rows.Err()
-}
-
-func (r *postgresSectionRepo) SearchText(ctx context.Context, query string, limit int) ([]model.SearchResult, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
-
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT s.episode_id, e.title, s.section_idx, s.text, 
-		       COALESCE(s.sentiment, ''), 1.0 as score
-		FROM podcast_sections s
-		JOIN episodes e ON e.id = s.episode_id
-		WHERE s.text ILIKE '%' || $1 || '%'
-		ORDER BY s.processed_at DESC
-		LIMIT $2
-	`, query, limit)
-	if err != nil {
-		return nil, fmt.Errorf("search sections: %w", err)
-	}
-	defer rows.Close()
-
-	var results []model.SearchResult
-	for rows.Next() {
-		var r model.SearchResult
-		if err := rows.Scan(&r.EpisodeID, &r.EpisodeTitle, &r.SectionIdx,
-			&r.Snippet, &r.Sentiment, &r.Score); err != nil {
-			return nil, fmt.Errorf("scan search result: %w", err)
-		}
-		results = append(results, r)
-	}
-	return results, rows.Err()
-}
-
 // --- Topic Repository ---
 
 type TopicRepository interface {
@@ -346,8 +208,6 @@ func NewTranscriptRepository(db *sql.DB) TranscriptRepository {
 }
 
 func (r *postgresTranscriptRepo) ListByEpisodeID(ctx context.Context, episodeID string) ([]model.TranscriptLine, error) {
-	// Join with fact_checks to determine has_fact_flag per line.
-	// A transcript line has a fact flag if any fact_check shares its start_time.
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT tl.id, tl.start_time, tl.text,
 		       CASE WHEN fc.id IS NOT NULL THEN true ELSE false END AS has_fact_flag
@@ -464,7 +324,7 @@ func (r *postgresConversationRepo) GetEpisodeID(ctx context.Context, conversatio
 	return episodeID, nil
 }
 
-// Helper to parse limit from string with bounds
+// ParseLimit parses a limit string with bounds enforcement.
 func ParseLimit(s string, defaultVal, maxVal int) int {
 	if s == "" {
 		return defaultVal

@@ -18,15 +18,8 @@ import (
 // @Failure      404  {object}  model.ApiError
 // @Router       /episodes/{id}/sync [get]
 func (h *Handler) SyncPlayback(c *gin.Context) {
-	episodeID := c.Param("id")
-
-	episode, err := h.Episodes.GetByID(c.Request.Context(), episodeID)
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
-		return
-	}
+	episode := h.getEpisodeOrAbort(c, c.Param("id"))
 	if episode == nil {
-		respondError(c, http.StatusNotFound, "episode_not_found", "Episode mit dieser ID existiert nicht.")
 		return
 	}
 
@@ -35,7 +28,6 @@ func (h *Handler) SyncPlayback(c *gin.Context) {
 	c.Header("Connection", "keep-alive")
 	c.Status(http.StatusOK)
 
-	// Stubbed: send a few sample position events then close
 	flusher := c.Writer.(http.Flusher)
 	positions := []int{0, 30, 60, 90, 120}
 
@@ -55,7 +47,6 @@ func (h *Handler) SyncPlayback(c *gin.Context) {
 		}
 	}
 
-	// Send analysis_ready event
-	fmt.Fprintf(c.Writer, "event: analysis_ready\ndata: {\"episode_id\":\"%s\"}\n\n", episodeID)
+	fmt.Fprintf(c.Writer, "event: analysis_ready\ndata: {\"episode_id\":\"%s\"}\n\n", episode.ID)
 	flusher.Flush()
 }

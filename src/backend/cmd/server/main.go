@@ -1,6 +1,6 @@
-// @title           Media-Lens API
+// @title           Audiolens API
 // @version         1.0
-// @description     Social Listening tool for podcasts and media.
+// @description     Podcast analysis backend — episodes, topics, transcripts, fact-checks, chat.
 // @host            localhost:8080
 // @BasePath        /api/v1
 package main
@@ -55,16 +55,13 @@ func main() {
 
 	// Create repositories
 	episodeRepo := repository.NewEpisodeRepository(db)
-	sectionRepo := repository.NewSectionRepository(db)
 	topicRepo := repository.NewTopicRepository(db)
 	transcriptRepo := repository.NewTranscriptRepository(db)
 	factCheckRepo := repository.NewFactCheckRepository(db)
 	conversationRepo := repository.NewConversationRepository(db)
 
-	// Create handler with dependencies
 	h := &handlers.Handler{
 		Episodes:      episodeRepo,
-		Sections:      sectionRepo,
 		Topics:        topicRepo,
 		Transcripts:   transcriptRepo,
 		FactChecks:    factCheckRepo,
@@ -76,38 +73,33 @@ func main() {
 
 	r := gin.Default()
 
-	// CORS middleware
+	// Global middleware
+	r.Use(handlers.MaxBodySize(1 << 20)) // 1 MB max request body
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.CORSOrigins,
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
 
-	// API v1 group
+	// API v1
 	v1 := r.Group("/api/v1")
 	{
 		v1.GET("/health", h.HealthCheck)
 
-		// Legacy endpoints
-		v1.GET("/podcasts", h.ListPodcasts)
-		v1.GET("/search", h.SearchTranscripts)
-		v1.GET("/audio-url/:id", h.GetAudioURL)
-
-		// Contract endpoints
+		// Episodes
 		v1.GET("/episodes", h.ListEpisodes)
-		v1.GET("/episodes/:id", h.GetEpisode)
-		v1.GET("/episodes/:id/sections", h.GetEpisodeSections)
-		v1.GET("/episodes/:id/topics", h.GetTopics)
-		v1.GET("/episodes/:id/transcript", h.GetTranscript)
-		v1.GET("/episodes/:id/fact-checks", h.GetFactChecks)
-		v1.GET("/episodes/:id/sync", h.SyncPlayback)
+		v1.GET("/episodes/:id", handlers.ValidateUUID("id"), h.GetEpisode)
+		v1.GET("/episodes/:id/topics", handlers.ValidateUUID("id"), h.GetTopics)
+		v1.GET("/episodes/:id/transcript", handlers.ValidateUUID("id"), h.GetTranscript)
+		v1.GET("/episodes/:id/fact-checks", handlers.ValidateUUID("id"), h.GetFactChecks)
+		v1.GET("/episodes/:id/sync", handlers.ValidateUUID("id"), h.SyncPlayback)
 
 		// Chat
 		v1.POST("/chat/conversations", h.CreateConversation)
-		v1.POST("/chat/conversations/:id/messages", h.SendMessage)
+		v1.POST("/chat/conversations/:id/messages", handlers.ValidateUUID("id"), h.SendMessage)
 	}
 
 	// Swagger UI

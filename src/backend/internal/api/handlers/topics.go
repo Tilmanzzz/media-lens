@@ -18,31 +18,24 @@ import (
 // @Failure      404  {object}  model.ApiError
 // @Router       /episodes/{id}/topics [get]
 func (h *Handler) GetTopics(c *gin.Context) {
-	episodeID := c.Param("id")
-
-	episode, err := h.Episodes.GetByID(c.Request.Context(), episodeID)
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
-		return
-	}
+	episode := h.getEpisodeOrAbort(c, c.Param("id"))
 	if episode == nil {
-		respondError(c, http.StatusNotFound, "episode_not_found", "Episode mit dieser ID existiert nicht.")
 		return
 	}
 
-	topics, err := h.Topics.ListByEpisodeID(c.Request.Context(), episodeID)
+	topics, err := h.Topics.ListByEpisodeID(c.Request.Context(), episode.ID)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
+		respondInternalError(c, err)
 		return
 	}
 
-	if topics == nil || len(topics) == 0 {
+	if len(topics) == 0 {
 		c.Status(http.StatusAccepted)
 		return
 	}
 
 	c.JSON(http.StatusOK, model.TopicsResponse{
-		EpisodeID: episodeID,
+		EpisodeID: episode.ID,
 		Topics:    topics,
 	})
 }

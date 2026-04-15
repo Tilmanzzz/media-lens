@@ -17,15 +17,11 @@ Go REST API built with **Gin** + **Swagger**. Serves podcast episode data, topic
 | POST | `/api/v1/chat/conversations/:id/messages` | Send message — NDJSON streaming response (stubbed) |
 | GET | `/api/v1/episodes/:id/sync` | SSE playback sync (stubbed) |
 
-### Additional Endpoints
+### Utility Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/health` | Health check (DB + MinIO) |
-| GET | `/api/v1/podcasts` | List distinct podcasts with episode counts |
-| GET | `/api/v1/episodes/:id/sections` | Podcast sections with sentiment & topics |
-| GET | `/api/v1/search?q=` | Text search across sections (`&limit=` optional) |
-| GET | `/api/v1/audio-url/:id` | Presigned MinIO URL for audio streaming |
 
 Swagger UI: **http://localhost:8080/swagger/index.html**
 
@@ -40,13 +36,12 @@ internal/
 ├── repository/              # Data access layer (interfaces + Postgres impl)
 ├── model/                   # Data models (DB + API contract schemas)
 └── api/handlers/            # HTTP handlers
-    ├── podcasts.go          # Episode list, detail, sections, search, podcasts
+    ├── podcasts.go          # Episode list + detail, shared middleware & helpers
     ├── topics.go            # Topics tab
     ├── transcript.go        # Transcript tab
     ├── factchecks.go        # Fact-check sidebar
     ├── chat.go              # Chat session + NDJSON streaming
     ├── sync.go              # SSE playback sync
-    ├── audio.go             # Presigned audio URLs
     └── health.go            # Health check
 ```
 
