@@ -15,48 +15,91 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/audio-url/{id}": {
-            "get": {
-                "description": "Generate a presigned MinIO URL for streaming an episode's audio file.",
+        "/chat/conversations": {
+            "post": {
+                "description": "Create a new chat conversation for an episode.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "audio"
+                    "chat"
                 ],
-                "summary": "Get a presigned audio URL",
+                "summary": "Neue Chat-Session starten",
+                "parameters": [
+                    {
+                        "description": "Episode ID",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.CreateConversationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/model.CreateConversationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/model.ApiError"
+                        }
+                    }
+                }
+            }
+        },
+        "/chat/conversations/{id}/messages": {
+            "post": {
+                "description": "Send a message and receive a stubbed NDJSON streaming response.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/x-ndjson"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "Nachricht senden — Antwort kommt als Stream",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Episode ID (UUID)",
+                        "description": "Conversation ID (UUID)",
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "description": "User message",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.SendMessageRequest"
+                        }
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "NDJSON stream of ChatStreamChunk"
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/model.AudioURLResponse"
+                            "$ref": "#/definitions/model.ApiError"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/model.ApiError"
                         }
                     }
                 }
@@ -64,19 +107,31 @@ const docTemplate = `{
         },
         "/episodes": {
             "get": {
-                "description": "Get episodes, optionally filtered by podcast_id.",
+                "description": "Cursor-based paginated episode list with optional free-text search.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "episodes"
                 ],
-                "summary": "List episodes",
+                "summary": "Episode-Liste",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Filter by podcast ID",
-                        "name": "podcast_id",
+                        "description": "Free-text search on title and podcast name",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Cursor from previous response",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (default 20, max 100)",
+                        "name": "limit",
                         "in": "query"
                     }
                 ],
@@ -84,19 +139,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.Episode"
-                            }
+                            "$ref": "#/definitions/model.EpisodeListResponse"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/model.ApiError"
                         }
                     }
                 }
@@ -104,14 +153,14 @@ const docTemplate = `{
         },
         "/episodes/{id}": {
             "get": {
-                "description": "Retrieve an episode and all its podcast sections by episode ID.",
+                "description": "Get episode detail for the header area above the tabs.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "episodes"
                 ],
-                "summary": "Get a single episode with its sections",
+                "summary": "Episode-Detail",
                 "parameters": [
                     {
                         "type": "string",
@@ -125,40 +174,28 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/model.EpisodeWithSections"
+                            "$ref": "#/definitions/model.EpisodeDetailResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/model.ApiError"
                         }
                     }
                 }
             }
         },
-        "/episodes/{id}/sections": {
+        "/episodes/{id}/fact-checks": {
             "get": {
-                "description": "Retrieve all podcast sections for a given episode ID.",
+                "description": "Get fact-check claims for an episode.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "sections"
+                    "fact-checks"
                 ],
-                "summary": "Get sections for an episode",
+                "summary": "Fact-Check-Flags für die Sidebar",
                 "parameters": [
                     {
                         "type": "string",
@@ -172,19 +209,118 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.PodcastSection"
-                            }
+                            "$ref": "#/definitions/model.FactChecksResponse"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/model.ApiError"
+                        }
+                    }
+                }
+            }
+        },
+        "/episodes/{id}/sync": {
+            "get": {
+                "description": "Server-Sent Events stream for playback synchronization (stubbed).",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "sync"
+                ],
+                "summary": "Playback-Position per SSE",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Episode ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/model.ApiError"
+                        }
+                    }
+                }
+            }
+        },
+        "/episodes/{id}/topics": {
+            "get": {
+                "description": "Get topics for an episode. Returns 202 if analysis is not ready yet.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "topics"
+                ],
+                "summary": "Themen für den Themen-Tab",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Episode ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.TopicsResponse"
+                        }
+                    },
+                    "202": {
+                        "description": "Analysis not ready"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/model.ApiError"
+                        }
+                    }
+                }
+            }
+        },
+        "/episodes/{id}/transcript": {
+            "get": {
+                "description": "Get transcript lines for an episode. Lines are annotated with has_fact_flag.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "transcript"
+                ],
+                "summary": "Transkript-Zeilen",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Episode ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.TranscriptResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/model.ApiError"
                         }
                     }
                 }
@@ -215,153 +351,150 @@ const docTemplate = `{
                     }
                 }
             }
-        },
-        "/podcasts": {
-            "get": {
-                "description": "Get a list of distinct podcasts with episode counts.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "podcasts"
-                ],
-                "summary": "List all podcasts",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.PodcastSummary"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/search": {
-            "get": {
-                "description": "Search all podcast sections for a keyword or phrase using ILIKE.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "search"
-                ],
-                "summary": "Search through section text",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Search query",
-                        "name": "q",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "description": "Max results (default 20, max 100)",
-                        "name": "limit",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.SearchResult"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
         }
     },
     "definitions": {
-        "model.AudioURLResponse": {
+        "model.ApiError": {
             "type": "object",
             "properties": {
-                "expires_in": {
-                    "type": "string",
-                    "example": "1h"
-                },
-                "url": {
-                    "type": "string",
-                    "example": "https://minio:9000/bronze/audio/...?X-Amz-Signature=..."
-                }
-            }
-        },
-        "model.Episode": {
-            "type": "object",
-            "properties": {
-                "audio_path": {
-                    "type": "string",
-                    "example": "bronze/audio/abc/def/original.mp3"
-                },
-                "id": {
-                    "type": "string",
-                    "example": "550e8400-e29b-41d4-a716-446655440000"
-                },
-                "ingested_at": {
+                "error": {
                     "type": "string"
                 },
-                "podcast_id": {
-                    "type": "string",
-                    "example": "the-daily"
+                "message": {
+                    "type": "string"
                 },
-                "published_at": {
-                    "type": "string",
-                    "example": "2026-04-07T00:00:00Z"
-                },
-                "title": {
-                    "type": "string",
-                    "example": "The Daily - Monday, April 7"
-                },
-                "xml_path": {
-                    "type": "string",
-                    "example": "bronze/podcasts/ep123.xml"
+                "status": {
+                    "type": "integer"
                 }
             }
         },
-        "model.EpisodeWithSections": {
+        "model.CreateConversationRequest": {
+            "type": "object",
+            "required": [
+                "episode_id"
+            ],
+            "properties": {
+                "episode_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.CreateConversationResponse": {
+            "type": "object",
+            "properties": {
+                "conversation_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.EpisodeCard": {
+            "type": "object",
+            "properties": {
+                "cover_url": {
+                    "type": "string"
+                },
+                "duration_seconds": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "podcast_name": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.EpisodeDetail": {
+            "type": "object",
+            "properties": {
+                "cover_url": {
+                    "type": "string"
+                },
+                "duration_seconds": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "podcast_name": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.EpisodeDetailResponse": {
             "type": "object",
             "properties": {
                 "episode": {
-                    "$ref": "#/definitions/model.Episode"
-                },
-                "sections": {
+                    "$ref": "#/definitions/model.EpisodeDetail"
+                }
+            }
+        },
+        "model.EpisodeListResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/model.PodcastSection"
+                        "$ref": "#/definitions/model.EpisodeCard"
                     }
+                },
+                "next_cursor": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.FactCheckClaim": {
+            "type": "object",
+            "properties": {
+                "claim": {
+                    "type": "string"
+                },
+                "explanation": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "start_time": {
+                    "type": "integer"
+                },
+                "verdict": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.FactChecksResponse": {
+            "type": "object",
+            "properties": {
+                "claims": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.FactCheckClaim"
+                    }
+                },
+                "episode_id": {
+                    "type": "string"
                 }
             }
         },
@@ -369,102 +502,101 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "database": {
-                    "type": "string",
-                    "example": "UP"
+                    "type": "string"
                 },
                 "minio": {
-                    "type": "string",
-                    "example": "UP"
+                    "type": "string"
                 },
                 "status": {
-                    "type": "string",
-                    "example": "UP"
+                    "type": "string"
                 }
             }
         },
-        "model.PodcastSection": {
+        "model.SendMessageContext": {
             "type": "object",
             "properties": {
-                "episode_id": {
-                    "type": "string",
-                    "example": "550e8400-e29b-41d4-a716-446655440000"
-                },
-                "id": {
-                    "type": "string",
-                    "example": "660e8400-e29b-41d4-a716-446655440000"
-                },
-                "processed_at": {
-                    "type": "string"
-                },
-                "section_idx": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "sentiment": {
-                    "type": "string",
-                    "example": "neutral"
-                },
-                "sentiment_score": {
-                    "type": "number",
-                    "example": 0.5
+                "current_time": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.SendMessageRequest": {
+            "type": "object",
+            "required": [
+                "text"
+            ],
+            "properties": {
+                "context": {
+                    "$ref": "#/definitions/model.SendMessageContext"
                 },
                 "text": {
                     "type": "string",
-                    "example": "Today we discuss..."
+                    "maxLength": 10000
+                }
+            }
+        },
+        "model.TopicCard": {
+            "type": "object",
+            "properties": {
+                "emotion": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "start_time": {
+                    "type": "integer"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "topic": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.TopicsResponse": {
+            "type": "object",
+            "properties": {
+                "episode_id": {
+                    "type": "string"
                 },
                 "topics": {
                     "type": "array",
                     "items": {
-                        "type": "string"
-                    },
-                    "example": [
-                        "unknown"
-                    ]
+                        "$ref": "#/definitions/model.TopicCard"
+                    }
                 }
             }
         },
-        "model.PodcastSummary": {
+        "model.TranscriptLine": {
             "type": "object",
             "properties": {
-                "episode_count": {
-                    "type": "integer",
-                    "example": 42
+                "has_fact_flag": {
+                    "type": "boolean"
                 },
-                "latest_episode": {
+                "id": {
                     "type": "string"
                 },
-                "podcast_id": {
-                    "type": "string",
-                    "example": "the-daily"
+                "start_time": {
+                    "type": "integer"
+                },
+                "text": {
+                    "type": "string"
                 }
             }
         },
-        "model.SearchResult": {
+        "model.TranscriptResponse": {
             "type": "object",
             "properties": {
                 "episode_id": {
-                    "type": "string",
-                    "example": "550e8400-e29b-41d4-a716-446655440000"
+                    "type": "string"
                 },
-                "episode_title": {
-                    "type": "string",
-                    "example": "The Daily - Monday, April 7"
-                },
-                "score": {
-                    "type": "number",
-                    "example": 0.95
-                },
-                "section_idx": {
-                    "type": "integer",
-                    "example": 2
-                },
-                "sentiment": {
-                    "type": "string",
-                    "example": "neutral"
-                },
-                "snippet": {
-                    "type": "string",
-                    "example": "...match found in the transcript..."
+                "lines": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.TranscriptLine"
+                    }
                 }
             }
         }
@@ -477,8 +609,8 @@ var SwaggerInfo = &swag.Spec{
 	Host:             "localhost:8080",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},
-	Title:            "Media-Lens API",
-	Description:      "Social Listening tool for podcasts and media.",
+	Title:            "Audiolens API",
+	Description:      "Podcast analysis backend — episodes, topics, transcripts, fact-checks, chat.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",
