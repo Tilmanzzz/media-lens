@@ -20,7 +20,7 @@ export function Sidebar() {
           </Link>
 
           <Link
-            href="/search"
+            href="/suche"
             className="flex items-center gap-3 rounded-xl px-3 py-2 text-lg transition hover:bg-background-raised hover:text-accent"
           >
             <Search size={22} aria-hidden="true" />

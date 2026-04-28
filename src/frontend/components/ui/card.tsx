@@ -1,33 +1,31 @@
 import Image from "next/image";
+import Link from "next/link";
 
 type InfoCardProps = {
+  id: number;
   episodeNr: number;
   titleEpi: string;
   description: string;
   titlePodcast: string;
   image: string;
-  href: string;
   badge?: string;
   duration?: string;
   date: string;
 };
 
 export function InfoCard({
+  id,
   episodeNr,
   titleEpi,
   description,
   titlePodcast,
   image,
-  href,
   badge,
   duration,
   date
 }: InfoCardProps) {
   return (
-    <a
-      href={href}
-      className="group block overflow-hidden rounded-2xl border border-border bg-background-card transition duration-200 hover:-translate-y-0.5 hover:bg-background-raised hover:border-border-strong"
-    >
+    <Link href={`/podcasts/${id}`} key={id} className="bg-primary-muted hover:bg-primary-hover shadow-xs rounded-xl">
       <div className="relative h-[170px] w-full">
         <Image src={image} alt={titleEpi} fill className="object-cover" />
       </div>
@@ -49,6 +47,6 @@ export function InfoCard({
             )}
         </div>
       </div>
-    </a>
+    </Link>
   );
 }
