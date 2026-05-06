@@ -10,6 +10,16 @@ load_dotenv(find_dotenv())
 print("conftest loaded")
 
 
+@pytest.fixture
+def podcast_id(conn):
+    """Creates a podcast record and returns its ID."""
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO podcasts DEFAULT VALUES RETURNING id")
+        row = cur.fetchone()
+        conn.commit()
+        return row[0]
+
+
 @pytest.fixture(scope="session")
 def pool():
     dsn = os.getenv("POSTGRES_URL")

@@ -2,7 +2,6 @@ import pytest
 import uuid
 from datetime import datetime, timezone
 from ..db.episodes import (
-    Episode,
     EpisodeStatus,
     NewEpisode,
     get,
@@ -20,7 +19,7 @@ def make_episode(pipeline_run_id: uuid.UUID, **kwargs) -> NewEpisode:
     defaults = dict(
         title="Test Episode",
         batch_id=pipeline_run_id,
-        podcast_id=uuid.uuid4(),
+        podcast_id=None,  # Change this from uuid.uuid4() to None
     )
     return NewEpisode(**{**defaults, **kwargs})
 
@@ -39,10 +38,21 @@ class TestGet:
         result = get(uuid.uuid4(), conn)
         assert result is None
 
-    def test_returns_episode_dataclass(self, conn, pipeline_run_id: uuid.UUID):
-        episode_id = save(make_episode(pipeline_run_id), conn)
+    def test_returns_episode_dataclass(
+        self, conn, pipeline_run_id: uuid.UUID, podcast_id: uuid.UUID
+    ):
+        episode_id = save(
+            make_episode(
+                pipeline_run_id,
+                title="My Podcast",
+                podcast_id=podcast_id,
+            ),
+            conn,
+        )
         result = get(episode_id, conn)
-        assert isinstance(result, Episode)
+
+        assert result.title == "My Podcast"
+        assert result.podcast_id == podcast_id
 
     def test_returns_correct_fields(self, conn, pipeline_run_id: uuid.UUID):
         test_podcast_id = uuid.uuid4()
@@ -177,12 +187,19 @@ class TestGetList:
         assert len(results) == 2
 
     def test_filter_by_podcast_id(self, conn, pipeline_run_id: uuid.UUID):
-        pod_x = uuid.uuid4()
-        pod_y = uuid.uuid4()
+        # Create two real podcasts
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO podcasts DEFAULT VALUES RETURNING id")
+            pod_x = cur.fetchone()[0]
+            cur.execute("INSERT INTO podcasts DEFAULT VALUES RETURNING id")
+            pod_y = cur.fetchone()[0]
+
         save(make_episode(pipeline_run_id, podcast_id=pod_x), conn)
         save(make_episode(pipeline_run_id, podcast_id=pod_y), conn)
+
         results = get_list(podcast_id=pod_x, conn=conn)
-        assert all(r.podcast_id == pod_x for r in results)
+        assert len(results) == 1
+        assert results[0].podcast_id == pod_x
 
     def test_filter_by_status(self, conn, pipeline_run_id: uuid.UUID):
         episode_id = save(make_episode(pipeline_run_id), conn)

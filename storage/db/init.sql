@@ -19,6 +19,10 @@ CREATE TABLE pipeline_runs (
   created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE podcasts (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid()
+);
+
 CREATE TABLE episodes (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   batch_id         UUID REFERENCES pipeline_runs(id),
