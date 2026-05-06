@@ -1,4 +1,5 @@
 import pytest
+import uuid
 from psycopg_pool import ConnectionPool
 from psycopg.rows import dict_row
 from dotenv import load_dotenv, find_dotenv
@@ -31,12 +32,12 @@ def conn(pool):
 
 
 @pytest.fixture
-def pipeline_run_id(conn) -> str:
+def pipeline_run_id(conn) -> uuid.UUID:  # Update type hint
     """Creates a pipeline_run row and returns its id for use in episode tests."""
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute("INSERT INTO pipeline_runs DEFAULT VALUES RETURNING id")
         row = cur.fetchone()
-        return str(row["id"])
+        return row["id"]  # Remove the str() cast here
 
 
 if __name__ == "__main__":

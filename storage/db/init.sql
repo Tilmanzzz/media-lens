@@ -19,13 +19,11 @@ CREATE TABLE pipeline_runs (
   created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-
 CREATE TABLE episodes (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   batch_id         UUID REFERENCES pipeline_runs(id),
   title            TEXT NOT NULL,
-  podcast_id       TEXT,
-  podcast_name     TEXT,
+  podcast_id UUID REFERENCES podcasts(id) ON DELETE CASCADE,
   published_at     TIMESTAMPTZ,
   duration_seconds INTEGER,
   audio_path       TEXT,
@@ -44,7 +42,7 @@ CREATE TABLE podcast_sections (
   section_idx     INT NOT NULL,
   text            TEXT,
   sentiment       TEXT,
-  sentiment_score FLOAT,
+  sentiment_score REAL,
   topics          TEXT[],
   processed_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -120,26 +118,11 @@ CREATE INDEX idx_embeddings_episode_id ON embeddings(episode_id);
 CREATE INDEX idx_embeddings_level ON embeddings(embedding_level);
 CREATE INDEX idx_embeddings_vector ON embeddings USING hnsw (embedding vector_cosine_ops);
 
-
-
-
--- delta load full load
-
----
--- 12 Uhr Podcast release
-
--- 12:05 ingestion start -> start_ts der max_batch id
--- 12:10 Änderung der Quelle (Titel, etc) 
--- 12:30 processed -> end_ts der max batch id --> done for now
---> Event signals Change / loop fetch (fetch all entries where batch_start_ts < 13:00)
---> annahme update_ts für jedes field in quelle
---> prüfen welche fields sich geändert haben -> update_ts (quelle) > batch_start_ts (topf)
-  --> returns count: über 5 lohnt sich drunter nicht oder so
---> update
-
-
-
--------
---> 
-
+CREATE OR REPLACE FUNCTION trigger_set_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
