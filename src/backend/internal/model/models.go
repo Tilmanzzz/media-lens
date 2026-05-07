@@ -138,6 +138,30 @@ type SSEAnalysisReadyEvent struct {
 	EpisodeID string `json:"episode_id"`
 }
 
+// SearchHighlight is a matching transcript chunk.
+type SearchHighlight struct {
+	Text      string  `json:"text"`
+	StartTime int     `json:"start_time"`
+	Score     float64 `json:"score"`
+}
+
+// SearchResultItem is a single episode match.
+type SearchResultItem struct {
+	EpisodeID   string            `json:"episode_id"`
+	Title       string            `json:"title"`
+	PodcastName string            `json:"podcast_name"`
+	CoverURL    string            `json:"cover_url"`
+	Score       float64           `json:"score"`
+	Highlights  []SearchHighlight `json:"highlights"`
+}
+
+// SearchResponse wraps semantic search results.
+type SearchResponse struct {
+	Query string             `json:"query"`
+	Items []SearchResultItem `json:"items"`
+	Total int                `json:"total"`
+}
+
 // ApiError is the standardized error response.
 type ApiError struct {
 	Error   string `json:"error"`
@@ -150,4 +174,6 @@ type HealthStatus struct {
 	Status   string `json:"status"`
 	Database string `json:"database"`
 	MinIO    string `json:"minio"`
+	Qdrant   string `json:"qdrant"`
+	Ollama   string `json:"ollama"`
 }

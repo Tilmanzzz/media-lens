@@ -22,8 +22,10 @@ import (
 	"media-lens/backend/internal/api/handlers"
 	"media-lens/backend/internal/config"
 	"media-lens/backend/internal/database"
+	"media-lens/backend/internal/embedder"
 	"media-lens/backend/internal/repository"
 	"media-lens/backend/internal/storage"
+	"media-lens/backend/internal/vectorstore"
 	_ "media-lens/backend/docs"
 )
 
@@ -53,6 +55,10 @@ func main() {
 		log.Fatalf("Failed to connect to MinIO: %v", err)
 	}
 
+	// Create Ollama embedder and Qdrant client
+	ollamaClient := embedder.NewOllamaClient(cfg.OllamaURL, cfg.EmbeddingModel)
+	qdrantClient := vectorstore.NewQdrantClient(cfg.QdrantURL, "podcast_embeddings")
+
 	// Create repositories
 	episodeRepo := repository.NewEpisodeRepository(db)
 	topicRepo := repository.NewTopicRepository(db)
@@ -69,6 +75,8 @@ func main() {
 		Minio:         minioClient,
 		Config:        cfg,
 		DB:            db,
+		Embedder:      ollamaClient,
+		VectorStore:   qdrantClient,
 	}
 
 	r := gin.Default()
@@ -88,6 +96,7 @@ func main() {
 	v1 := r.Group("/api/v1")
 	{
 		v1.GET("/health", h.HealthCheck)
+		v1.GET("/search", h.SemanticSearch)
 
 		// Episodes
 		v1.GET("/episodes", h.ListEpisodes)

@@ -11,9 +11,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"media-lens/backend/internal/config"
+	"media-lens/backend/internal/embedder"
 	"media-lens/backend/internal/model"
 	"media-lens/backend/internal/repository"
 	"media-lens/backend/internal/storage"
+	"media-lens/backend/internal/vectorstore"
 )
 
 // Handler holds all dependencies for HTTP handlers.
@@ -26,6 +28,8 @@ type Handler struct {
 	Minio         *minio.Client
 	Config        *config.Config
 	DB            *sql.DB
+	Embedder      *embedder.OllamaClient
+	VectorStore   *vectorstore.QdrantClient
 }
 
 // respondError sends a standardized ApiError JSON response.
