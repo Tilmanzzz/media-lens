@@ -9,6 +9,21 @@ import (
 	pgvector "github.com/pgvector/pgvector-go"
 )
 
+type EpisodeHit struct {
+	EpisodeID    string  `json:"episode_id"`
+	EpisodeTitle string  `json:"episode_title"`
+	PodcastName  string  `json:"podcast_name"`
+	CoverPath    string  `json:"cover_path"`
+	Score        float64 `json:"score"`
+}
+
+type ChunkHit struct {
+	EpisodeID string  `json:"episode_id"`
+	Text      string  `json:"text"`
+	StartTime int     `json:"start_time"`
+	Score     float64 `json:"score"`
+}
+
 type PgVectorClient struct {
 	db *sql.DB
 }

@@ -15,7 +15,6 @@ type Config struct {
 	MinioUseSSL    bool
 	MinioBucket    string
 	CORSOrigins    []string
-	QdrantURL      string
 	OllamaURL      string
 	EmbeddingModel string
 }
@@ -30,7 +29,6 @@ func Load() (*Config, error) {
 		MinioUseSSL:    os.Getenv("MINIO_USE_SSL") == "true",
 		MinioBucket:    getEnvOrDefault("MINIO_BUCKET", "bronze"),
 		CORSOrigins:    strings.Split(getEnvOrDefault("CORS_ORIGINS", "http://localhost:3000"), ","),
-		QdrantURL:      getEnvOrDefault("QDRANT_URL", "http://qdrant:6333"),
 		OllamaURL:      getEnvOrDefault("OLLAMA_URL", "http://ollama:11434"),
 		EmbeddingModel: getEnvOrDefault("EMBEDDING_MODEL", "qwen3-embedding:4b"),
 	}

@@ -174,6 +174,5 @@ type HealthStatus struct {
 	Status   string `json:"status"`
 	Database string `json:"database"`
 	MinIO    string `json:"minio"`
-	Qdrant   string `json:"qdrant"`
 	Ollama   string `json:"ollama"`
 }
