@@ -55,7 +55,7 @@ services:
       - .env
 
   processing_silver:
-    build: ./src/02_processing/02_silver/
+    build: ./src/02_processing/silver/
     depends_on:
       postgres:
         condition: service_started
