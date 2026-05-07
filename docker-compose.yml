@@ -3,7 +3,7 @@ services:
   #   docker compose down postgres -v
   #   docker compose up postgres --build --force-recreate
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: "podcasts"
       POSTGRES_USER: ${POSTGRES_USER}
