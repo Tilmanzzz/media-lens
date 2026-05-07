@@ -1,6 +1,6 @@
-// @title           Media-Lens API
+// @title           Audiolens API
 // @version         1.0
-// @description     Social Listening tool for podcasts and media.
+// @description     Podcast analysis backend — episodes, topics, transcripts, fact-checks, chat.
 // @host            localhost:8080
 // @BasePath        /api/v1
 package main
@@ -22,8 +22,10 @@ import (
 	"media-lens/backend/internal/api/handlers"
 	"media-lens/backend/internal/config"
 	"media-lens/backend/internal/database"
+	"media-lens/backend/internal/embedder"
 	"media-lens/backend/internal/repository"
 	"media-lens/backend/internal/storage"
+	"media-lens/backend/internal/vectorstore"
 	_ "media-lens/backend/docs"
 )
 
@@ -53,45 +55,60 @@ func main() {
 		log.Fatalf("Failed to connect to MinIO: %v", err)
 	}
 
+	// Create Ollama embedder and Qdrant client
+	ollamaClient := embedder.NewOllamaClient(cfg.OllamaURL, cfg.EmbeddingModel)
+	qdrantClient := vectorstore.NewQdrantClient(cfg.QdrantURL, "podcast_embeddings")
+
 	// Create repositories
 	episodeRepo := repository.NewEpisodeRepository(db)
-	sectionRepo := repository.NewSectionRepository(db)
+	topicRepo := repository.NewTopicRepository(db)
+	transcriptRepo := repository.NewTranscriptRepository(db)
+	factCheckRepo := repository.NewFactCheckRepository(db)
+	conversationRepo := repository.NewConversationRepository(db)
 
-	// Create handler with dependencies
 	h := &handlers.Handler{
-		Episodes: episodeRepo,
-		Sections: sectionRepo,
-		Minio:    minioClient,
-		Config:   cfg,
-		DB:       db,
+		Episodes:      episodeRepo,
+		Topics:        topicRepo,
+		Transcripts:   transcriptRepo,
+		FactChecks:    factCheckRepo,
+		Conversations: conversationRepo,
+		Minio:         minioClient,
+		Config:        cfg,
+		DB:            db,
+		Embedder:      ollamaClient,
+		VectorStore:   qdrantClient,
 	}
 
 	r := gin.Default()
 
-	// CORS middleware
+	// Global middleware
+	r.Use(handlers.MaxBodySize(1 << 20)) // 1 MB max request body
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.CORSOrigins,
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
 
-	// API v1 group
+	// API v1
 	v1 := r.Group("/api/v1")
 	{
 		v1.GET("/health", h.HealthCheck)
+		v1.GET("/search", h.SemanticSearch)
 
-		v1.GET("/podcasts", h.ListPodcasts)
-
+		// Episodes
 		v1.GET("/episodes", h.ListEpisodes)
-		v1.GET("/episodes/:id", h.GetEpisode)
-		v1.GET("/episodes/:id/sections", h.GetEpisodeSections)
+		v1.GET("/episodes/:id", handlers.ValidateUUID("id"), h.GetEpisode)
+		v1.GET("/episodes/:id/topics", handlers.ValidateUUID("id"), h.GetTopics)
+		v1.GET("/episodes/:id/transcript", handlers.ValidateUUID("id"), h.GetTranscript)
+		v1.GET("/episodes/:id/fact-checks", handlers.ValidateUUID("id"), h.GetFactChecks)
+		v1.GET("/episodes/:id/sync", handlers.ValidateUUID("id"), h.SyncPlayback)
 
-		v1.GET("/search", h.SearchTranscripts)
-
-		v1.GET("/audio-url/:id", h.GetAudioURL)
+		// Chat
+		v1.POST("/chat/conversations", h.CreateConversation)
+		v1.POST("/chat/conversations/:id/messages", handlers.ValidateUUID("id"), h.SendMessage)
 	}
 
 	// Swagger UI

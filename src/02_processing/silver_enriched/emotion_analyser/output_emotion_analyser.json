@@ -1,0 +1,20 @@
+[
+  {
+    "file": "C:\\Users\\jbai\\Documents\\HdM\\semester_2\\Data_Engineering\\audio-lens\\src\\02_processing\\silver_enriched\\emotion_analyser\\audio_test\\angry_example.wav",
+    "emotion": "ang",
+    "emotionId": 2,
+    "confidence": 0.91579270362854
+  },
+  {
+    "file": "C:\\Users\\jbai\\Documents\\HdM\\semester_2\\Data_Engineering\\audio-lens\\src\\02_processing\\silver_enriched\\emotion_analyser\\audio_test\\sad_example.wav",
+    "emotion": "sad",
+    "emotionId": 3,
+    "confidence": 0.986164927482605
+  },
+  {
+    "file": "C:\\Users\\jbai\\Documents\\HdM\\semester_2\\Data_Engineering\\audio-lens\\src\\02_processing\\silver_enriched\\emotion_analyser\\audio_test\\happy_example.wav",
+    "emotion": "ang",
+    "emotionId": 2,
+    "confidence": 0.9297162294387817
+  }
+]

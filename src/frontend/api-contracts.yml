@@ -1,0 +1,622 @@
+openapi: 3.0.3
+
+info:
+  title: Audiolens Display Contract
+  version: 1.0.0
+  description: >
+    Nur die Felder die zur Darstellung im Frontend benötigt werden.
+    Kein internes Datenmodell — nur was auf dem Screen landet.
+
+servers:
+  - url: http://localhost:8080/v1
+    description: Lokal
+
+# ------------------------------------------------------------------
+# PFADE
+# ------------------------------------------------------------------
+
+paths:
+
+  # ----------------------------------------------------------------
+  # EPISODE-LISTE
+  # Angezeigt: Titel, Podcast-Name, Dauer, Datum, Cover-Bild
+  # Suche: Freitext
+  # Pagination: cursor-basiert
+  # ----------------------------------------------------------------
+
+  /episodes:
+    get:
+      summary: Episode-Liste
+      operationId: listEpisodes
+      parameters:
+        - name: q
+          in: query
+          description: Freitextsuche auf Titel und Podcast-Name
+          required: false
+          schema:
+            type: string
+            example: "Lex Fridman KI"
+
+        - name: cursor
+          in: query
+          description: Cursor vom vorherigen Response für die nächste Seite
+          required: false
+          schema:
+            type: string
+
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+
+      responses:
+        "200":
+          description: Liste von Episode-Karten
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EpisodeListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+
+  # ----------------------------------------------------------------
+  # EPISODE-DETAIL — oberer Bereich (über den Tabs)
+  # Angezeigt: Titel, Podcast-Name, Dauer, Datum, Cover
+  # ----------------------------------------------------------------
+
+  /episodes/{episodeId}:
+    get:
+      summary: Episode-Detail
+      operationId: getEpisode
+      parameters:
+        - $ref: "#/components/parameters/EpisodeId"
+      responses:
+        "200":
+          description: Episode-Detail für den oberen Bereich
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EpisodeDetailResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+
+  # ----------------------------------------------------------------
+  # THEMEN-TAB (Standard-Tab)
+  # Angezeigt pro Karte: Thema, Timestamp, Emotion, Zusammenfassung,
+  # ----------------------------------------------------------------
+
+  /episodes/{episodeId}/topics:
+    get:
+      summary: Themen für den Themen-Tab
+      operationId: getTopics
+      parameters:
+        - $ref: "#/components/parameters/EpisodeId"
+      responses:
+        "200":
+          description: Themen-Liste
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopicsResponse"
+        "202":
+          description: Analyse noch nicht fertig
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+
+  # ----------------------------------------------------------------
+  # TRANSKRIPT-TAB
+  # Angezeigt pro Zeile: Text + Timestamp
+  # ----------------------------------------------------------------
+
+  /episodes/{episodeId}/transcript:
+    get:
+      summary: Transkript-Zeilen
+      operationId: getTranscript
+      parameters:
+        - $ref: "#/components/parameters/EpisodeId"
+      responses:
+        "200":
+          description: Transkript
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+
+  # ----------------------------------------------------------------
+  # FACT-CHECK SIDEBAR
+  # Angezeigt pro Flag: Verdict, Claim, Explanation, Sources, Timestamp
+  # ----------------------------------------------------------------
+
+  /episodes/{episodeId}/fact-checks:
+    get:
+      summary: Fact-Check-Flags für die Sidebar
+      operationId: getFactChecks
+      parameters:
+        - $ref: "#/components/parameters/EpisodeId"
+      responses:
+        "200":
+          description: Fact-Check-Ergebnisse
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FactChecksResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+
+  # ----------------------------------------------------------------
+  # PLAYBACK SYNC — SSE
+  # Pushed: aktuelle Zeit + aktives Segment
+  # ----------------------------------------------------------------
+
+  # ----------------------------------------------------------------
+  # CHAT-TAB
+  # Session-basiert — kein Persist nach Reload
+  # Bot-Antwort: nur Text, per Streaming (NDJSON)
+  # ----------------------------------------------------------------
+
+  /chat/conversations:
+    post:
+      summary: Neue Chat-Session starten
+      operationId: createConversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateConversationRequest"
+      responses:
+        "201":
+          description: Session erstellt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateConversationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /chat/conversations/{conversationId}/messages:
+    post:
+      summary: Nachricht senden — Antwort kommt als Stream
+      description: >
+        Response ist application/x-ndjson.
+        Jede Zeile ist ein ChatStreamChunk (type: token | done | error).
+        Frontend hängt delta-Werte direkt ans UI an.
+      operationId: sendMessage
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageRequest"
+      responses:
+        "200":
+          description: NDJSON-Stream
+          content:
+            application/x-ndjson:
+              schema:
+                $ref: "#/components/schemas/ChatStreamChunk"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+
+  # ----------------------------------------------------------------
+  # PLAYBACK SYNC — SSE
+  # Pushed: aktuelle Zeit + aktives Segment
+  # ----------------------------------------------------------------
+
+  /episodes/{episodeId}/sync:
+    get:
+      summary: Playback-Position per SSE
+      operationId: syncPlayback
+      parameters:
+        - $ref: "#/components/parameters/EpisodeId"
+      responses:
+        "200":
+          description: >
+            Server-Sent Events Stream.
+            event: position → SSEPositionEvent
+            event: analysis_ready → SSEAnalysisReadyEvent
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/SSEPositionEvent"
+
+
+# ------------------------------------------------------------------
+# KOMPONENTEN
+# ------------------------------------------------------------------
+
+components:
+
+  parameters:
+    EpisodeId:
+      name: episodeId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    ConversationId:
+      name: conversationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: Ungültige Anfrage
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    NotFound:
+      description: Nicht gefunden
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+
+  schemas:
+
+    # --------------------------------------------------------------
+    # EPISODE-LISTE
+    # --------------------------------------------------------------
+
+    EpisodeListResponse:
+      type: object
+      required: [items, next_cursor, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/EpisodeCard"
+        next_cursor:
+          type: string
+          nullable: true
+          description: Null wenn keine weitere Seite vorhanden
+        total:
+          type: integer
+          description: Gesamtanzahl der Treffer (für Suchanzeige)
+
+    EpisodeCard:
+      description: Felder die auf einer Episode-Karte in der Liste angezeigt werden
+      type: object
+      required: [id, title, podcast_name, duration_seconds, published_at, cover_url]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: "KI & die Grenzen des Verstehens"
+        podcast_name:
+          type: string
+          example: "Lex Fridman Podcast"
+        duration_seconds:
+          type: integer
+          description: Gesamtlänge in Sekunden — Frontend formatiert zu MM:SS / H:MM:SS
+          example: 3738
+        published_at:
+          type: string
+          format: date
+          example: "2024-03-15"
+        cover_url:
+          type: string
+          format: uri
+          description: Presigned MinIO URL (TTL 1h)
+          example: "https://minio.audiolens.dev/covers/ep-421.jpg"
+
+
+    # --------------------------------------------------------------
+    # EPISODE-DETAIL (oberer Bereich)
+    # --------------------------------------------------------------
+
+    EpisodeDetailResponse:
+      type: object
+      required: [episode]
+      properties:
+        episode:
+          $ref: "#/components/schemas/EpisodeDetail"
+
+    EpisodeDetail:
+      description: Felder die über den Tabs angezeigt werden
+      type: object
+      required: [id, title, podcast_name, duration_seconds, published_at, cover_url]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        podcast_name:
+          type: string
+        duration_seconds:
+          type: integer
+        published_at:
+          type: string
+          format: date
+        cover_url:
+          type: string
+          format: uri
+
+
+    # --------------------------------------------------------------
+    # THEMEN-TAB
+    # --------------------------------------------------------------
+
+    TopicsResponse:
+      type: object
+      required: [episode_id, topics]
+      properties:
+        episode_id:
+          type: string
+          format: uuid
+        topics:
+          type: array
+          items:
+            $ref: "#/components/schemas/TopicCard"
+
+    TopicCard:
+      description: Felder die auf einer Themen-Karte angezeigt werden
+      type: object
+      required: [id, topic, start_time, emotion, summary]
+      properties:
+        id:
+          type: string
+          format: uuid
+        topic:
+          type: string
+          example: "KI & Bewusstsein"
+        start_time:
+          type: integer
+          description: Startzeit in Sekunden — Frontend formatiert zu MM:SS
+          example: 724
+        emotion:
+          $ref: "#/components/schemas/EmotionLabel"
+        summary:
+          type: string
+          example: "Diskussion über die philosophischen Grenzen von LLMs."
+
+
+
+    # --------------------------------------------------------------
+    # TRANSKRIPT-TAB
+    # --------------------------------------------------------------
+
+    TranscriptResponse:
+      type: object
+      required: [episode_id, lines]
+      properties:
+        episode_id:
+          type: string
+          format: uuid
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/TranscriptLine"
+
+    TranscriptLine:
+      description: Eine Zeile im Transkript
+      type: object
+      required: [id, start_time, text]
+      properties:
+        id:
+          type: string
+          format: uuid
+        start_time:
+          type: integer
+          description: In Sekunden — Frontend formatiert zu MM:SS
+          example: 724
+        text:
+          type: string
+          example: "Wann hört Simulation auf und beginnt echtes Verständnis?"
+        has_fact_flag:
+          type: boolean
+          description: >
+            True wenn diese Zeile einen Fact-Check-Flag hat.
+            Frontend kann die Zeile dann optisch markieren.
+          default: false
+
+
+    # --------------------------------------------------------------
+    # FACT-CHECK SIDEBAR
+    # --------------------------------------------------------------
+
+    FactChecksResponse:
+      type: object
+      required: [episode_id, claims]
+      properties:
+        episode_id:
+          type: string
+          format: uuid
+        claims:
+          type: array
+          items:
+            $ref: "#/components/schemas/FactCheckClaim"
+
+    FactCheckClaim:
+      description: Ein Fact-Check-Eintrag in der Sidebar
+      type: object
+      required: [id, start_time, claim, verdict, explanation, sources]
+      properties:
+        id:
+          type: string
+          format: uuid
+        start_time:
+          type: integer
+          description: Timestamp in Sekunden — Link zum Transkript
+          example: 1110
+        claim:
+          type: string
+          example: "KI-Systeme ersetzen bis 2025 über 80% aller Bürojobs."
+        verdict:
+          $ref: "#/components/schemas/FactVerdict"
+        explanation:
+          type: string
+          example: "Diese These ist durch aktuelle Studien nicht belegt."
+        sources:
+          type: array
+          items:
+            type: string
+            format: uri
+          example:
+            - "https://en.wikipedia.org/wiki/Jupiter"
+
+
+    # --------------------------------------------------------------
+    # SSE — PLAYBACK SYNC
+    # --------------------------------------------------------------
+
+    SSEPositionEvent:
+      description: >
+        Wird bei jedem Segment-Wechsel gepushed.
+        Frontend scrollt Transkript zur passenden Zeile.
+      type: object
+      required: [current_time, active_transcript_line_id, progress_percent]
+      properties:
+        current_time:
+          type: integer
+          description: Aktuelle Position in Sekunden
+          example: 724
+        active_transcript_line_id:
+          type: string
+          format: uuid
+          description: ID der aktuell aktiven Transkript-Zeile
+        progress_percent:
+          type: number
+          minimum: 0
+          maximum: 100
+          example: 19.3
+
+    SSEAnalysisReadyEvent:
+      description: Einmalig gepushed wenn Airflow die Analyse abgeschlossen hat
+      type: object
+      required: [episode_id]
+      properties:
+        episode_id:
+          type: string
+          format: uuid
+
+
+    # --------------------------------------------------------------
+    # CHAT-TAB
+    # --------------------------------------------------------------
+
+    CreateConversationRequest:
+      type: object
+      required: [episode_id]
+      properties:
+        episode_id:
+          type: string
+          format: uuid
+
+    CreateConversationResponse:
+      type: object
+      required: [conversation_id]
+      properties:
+        conversation_id:
+          type: string
+          format: uuid
+          description: Wird für alle weiteren Requests dieser Session verwendet
+
+    SendMessageRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          description: Frage des Users
+          example: "Was sagt Fridman über die Grenzen von LLMs?"
+        context:
+          type: object
+          description: Optionaler Kontext aus dem Player — hilft dem LLM relevanter zu antworten
+          properties:
+            current_time:
+              type: integer
+              description: Aktuelle Playback-Position in Sekunden
+              example: 724
+
+    ChatStreamChunk:
+      description: >
+        Eine Zeile im NDJSON-Stream.
+        type=token → delta an UI anhängen.
+        type=done  → Stream schließen.
+        type=error → Fehler anzeigen.
+      oneOf:
+        - title: token
+          type: object
+          required: [type, delta]
+          properties:
+            type:
+              type: string
+              enum: [token]
+            delta:
+              type: string
+              description: Nächstes Token vom LLM
+              example: "Fridman"
+
+        - title: done
+          type: object
+          required: [type]
+          properties:
+            type:
+              type: string
+              enum: [done]
+
+        - title: error
+          type: object
+          required: [type, message]
+          properties:
+            type:
+              type: string
+              enum: [error]
+            message:
+              type: string
+              example: "LLM nicht erreichbar"
+
+      discriminator:
+        propertyName: type
+
+
+    # --------------------------------------------------------------
+    # SHARED
+    # --------------------------------------------------------------
+
+    EmotiontLabel:
+      type: string
+      enum: [positive, neutral, negative]
+
+    FactVerdict:
+      type: string
+      enum: [TRUE, MOSTLY_TRUE, MISLEADING, FALSE, UNVERIFIABLE]
+
+    ApiError:
+      type: object
+      required: [error, message, status]
+      properties:
+        error:
+          type: string
+          example: "episode_not_found"
+        message:
+          type: string
+          example: "Episode mit dieser ID existiert nicht."
+        status:
+          type: integer
+          example: 404

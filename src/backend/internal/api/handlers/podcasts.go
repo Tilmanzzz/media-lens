@@ -2,170 +2,212 @@ package handlers
 
 import (
 	"database/sql"
+	"log"
 	"net/http"
-	"strconv"
+	"net/url"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"media-lens/backend/internal/config"
+	"media-lens/backend/internal/embedder"
 	"media-lens/backend/internal/model"
 	"media-lens/backend/internal/repository"
+	"media-lens/backend/internal/storage"
+	"media-lens/backend/internal/vectorstore"
 )
 
+// Handler holds all dependencies for HTTP handlers.
 type Handler struct {
-	Episodes repository.EpisodeRepository
-	Sections repository.SectionRepository
-	Minio    *minio.Client
-	Config   *config.Config
-	DB       *sql.DB
+	Episodes      repository.EpisodeRepository
+	Topics        repository.TopicRepository
+	Transcripts   repository.TranscriptRepository
+	FactChecks    repository.FactCheckRepository
+	Conversations repository.ConversationRepository
+	Minio         *minio.Client
+	Config        *config.Config
+	DB            *sql.DB
+	Embedder      *embedder.OllamaClient
+	VectorStore   *vectorstore.QdrantClient
 }
 
-// ListPodcasts godoc
-// @Summary      List all podcasts
-// @Description  Get a list of distinct podcasts with episode counts.
-// @Tags         podcasts
-// @Produce      json
-// @Success      200  {array}   model.PodcastSummary
-// @Failure      500  {object}  map[string]string
-// @Router       /podcasts [get]
-func (h *Handler) ListPodcasts(c *gin.Context) {
-	summaries, err := h.Episodes.ListDistinctPodcasts(c.Request.Context())
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	if summaries == nil {
-		summaries = []model.PodcastSummary{}
-	}
-	c.JSON(http.StatusOK, summaries)
-}
-
-// ListEpisodes godoc
-// @Summary      List episodes
-// @Description  Get episodes, optionally filtered by podcast_id.
-// @Tags         episodes
-// @Produce      json
-// @Param        podcast_id  query     string  false  "Filter by podcast ID"
-// @Success      200  {array}   model.Episode
-// @Failure      500  {object}  map[string]string
-// @Router       /episodes [get]
-func (h *Handler) ListEpisodes(c *gin.Context) {
-	podcastID := c.Query("podcast_id")
-
-	var (
-		episodes []model.Episode
-		err      error
-	)
-
-	if podcastID != "" {
-		episodes, err = h.Episodes.ListByPodcastID(c.Request.Context(), podcastID)
-	} else {
-		episodes, err = h.Episodes.ListAll(c.Request.Context())
-	}
-
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	if episodes == nil {
-		episodes = []model.Episode{}
-	}
-	c.JSON(http.StatusOK, episodes)
-}
-
-// GetEpisode godoc
-// @Summary      Get a single episode with its sections
-// @Description  Retrieve an episode and all its podcast sections by episode ID.
-// @Tags         episodes
-// @Produce      json
-// @Param        id   path      string  true  "Episode ID (UUID)"
-// @Success      200  {object}  model.EpisodeWithSections
-// @Failure      404  {object}  map[string]string
-// @Failure      500  {object}  map[string]string
-// @Router       /episodes/{id} [get]
-func (h *Handler) GetEpisode(c *gin.Context) {
-	id := c.Param("id")
-
-	episode, err := h.Episodes.GetByID(c.Request.Context(), id)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	if episode == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "episode not found"})
-		return
-	}
-
-	sections, err := h.Sections.ListByEpisodeID(c.Request.Context(), id)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	if sections == nil {
-		sections = []model.PodcastSection{}
-	}
-
-	c.JSON(http.StatusOK, model.EpisodeWithSections{
-		Episode:  *episode,
-		Sections: sections,
+// respondError sends a standardized ApiError JSON response.
+func respondError(c *gin.Context, status int, errCode, message string) {
+	c.JSON(status, model.ApiError{
+		Error:   errCode,
+		Message: message,
+		Status:  status,
 	})
 }
 
-// GetEpisodeSections godoc
-// @Summary      Get sections for an episode
-// @Description  Retrieve all podcast sections for a given episode ID.
-// @Tags         sections
-// @Produce      json
-// @Param        id   path      string  true  "Episode ID (UUID)"
-// @Success      200  {array}   model.PodcastSection
-// @Failure      500  {object}  map[string]string
-// @Router       /episodes/{id}/sections [get]
-func (h *Handler) GetEpisodeSections(c *gin.Context) {
-	id := c.Param("id")
-
-	sections, err := h.Sections.ListByEpisodeID(c.Request.Context(), id)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	if sections == nil {
-		sections = []model.PodcastSection{}
-	}
-	c.JSON(http.StatusOK, sections)
+// respondInternalError logs the real error and sends a generic message to the client.
+func respondInternalError(c *gin.Context, err error) {
+	log.Printf("ERROR %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+	respondError(c, http.StatusInternalServerError, "internal_error", "Ein interner Fehler ist aufgetreten.")
 }
 
-// SearchTranscripts godoc
-// @Summary      Search through section text
-// @Description  Search all podcast sections for a keyword or phrase using ILIKE.
-// @Tags         search
-// @Produce      json
-// @Param        q      query     string  true   "Search query"
-// @Param        limit  query     int     false  "Max results (default 20, max 100)"
-// @Success      200  {array}   model.SearchResult
-// @Failure      400  {object}  map[string]string
-// @Failure      500  {object}  map[string]string
-// @Router       /search [get]
-func (h *Handler) SearchTranscripts(c *gin.Context) {
-	query := c.Query("q")
-	if query == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "query parameter 'q' is required"})
-		return
+// ValidateUUID returns Gin middleware that validates a path parameter as UUID.
+func ValidateUUID(paramName string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param(paramName)
+		if _, err := uuid.Parse(id); err != nil {
+			respondError(c, http.StatusBadRequest, "invalid_id", "Ungültiges UUID-Format.")
+			c.Abort()
+			return
+		}
+		c.Next()
 	}
+}
 
-	limit := 20
-	if l := c.Query("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil {
-			limit = parsed
+// MaxBodySize returns Gin middleware that limits request body size.
+func MaxBodySize(maxBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Body != nil {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+		}
+		c.Next()
+	}
+}
+
+// getEpisodeOrAbort fetches an episode by ID and handles 404/500 responses.
+// Returns nil if the request was aborted (error already sent to client).
+func (h *Handler) getEpisodeOrAbort(c *gin.Context, episodeID string) *model.Episode {
+	episode, err := h.Episodes.GetByID(c.Request.Context(), episodeID)
+	if err != nil {
+		respondInternalError(c, err)
+		return nil
+	}
+	if episode == nil {
+		respondError(c, http.StatusNotFound, "episode_not_found", "Episode mit dieser ID existiert nicht.")
+		return nil
+	}
+	return episode
+}
+
+// presignCoverURLs batch-generates presigned cover URLs for a slice of episodes.
+func (h *Handler) presignCoverURLs(c *gin.Context, episodes []model.Episode) map[string]*url.URL {
+	urls := make(map[string]*url.URL, len(episodes))
+	for _, ep := range episodes {
+		if ep.CoverPath == "" {
+			continue
+		}
+		if _, exists := urls[ep.CoverPath]; exists {
+			continue
+		}
+		u, err := storage.GeneratePresignedURL(c.Request.Context(), h.Minio, h.Config.MinioBucket, ep.CoverPath, 1*time.Hour)
+		if err != nil {
+			log.Printf("WARN presign cover %q: %v", ep.CoverPath, err)
+			continue
+		}
+		urls[ep.CoverPath] = u
+	}
+	return urls
+}
+
+func episodeToCard(ep model.Episode, coverURLs map[string]*url.URL) model.EpisodeCard {
+	card := model.EpisodeCard{
+		ID:          ep.ID,
+		Title:       ep.Title,
+		PodcastName: ep.PodcastName,
+		PublishedAt: formatDate(ep.PublishedAt),
+	}
+	if ep.DurationSeconds != nil {
+		card.DurationSeconds = *ep.DurationSeconds
+	}
+	if u, ok := coverURLs[ep.CoverPath]; ok {
+		card.CoverURL = u.String()
+	}
+	return card
+}
+
+func (h *Handler) episodeToDetail(c *gin.Context, ep model.Episode) model.EpisodeDetail {
+	detail := model.EpisodeDetail{
+		ID:          ep.ID,
+		Title:       ep.Title,
+		PodcastName: ep.PodcastName,
+		PublishedAt: formatDate(ep.PublishedAt),
+	}
+	if ep.DurationSeconds != nil {
+		detail.DurationSeconds = *ep.DurationSeconds
+	}
+	if ep.CoverPath != "" {
+		u, err := storage.GeneratePresignedURL(c.Request.Context(), h.Minio, h.Config.MinioBucket, ep.CoverPath, 1*time.Hour)
+		if err == nil {
+			detail.CoverURL = u.String()
+		} else {
+			log.Printf("WARN presign cover %q: %v", ep.CoverPath, err)
 		}
 	}
+	return detail
+}
 
-	results, err := h.Sections.SearchText(c.Request.Context(), query, limit)
+func formatDate(t sql.NullTime) string {
+	if !t.Valid {
+		return ""
+	}
+	return t.Time.Format("2006-01-02")
+}
+
+// ListEpisodes godoc
+// @Summary      Episode-Liste
+// @Description  Cursor-based paginated episode list with optional free-text search.
+// @Tags         episodes
+// @Produce      json
+// @Param        q       query     string  false  "Free-text search on title and podcast name"
+// @Param        cursor  query     string  false  "Cursor from previous response"
+// @Param        limit   query     int     false  "Page size (default 20, max 100)"
+// @Success      200  {object}  model.EpisodeListResponse
+// @Failure      400  {object}  model.ApiError
+// @Router       /episodes [get]
+func (h *Handler) ListEpisodes(c *gin.Context) {
+	q := c.Query("q")
+	cursor := c.Query("cursor")
+	limit := repository.ParseLimit(c.Query("limit"), 20, 100)
+
+	episodes, total, err := h.Episodes.ListPaginated(c.Request.Context(), q, cursor, limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondInternalError(c, err)
 		return
 	}
-	if results == nil {
-		results = []model.SearchResult{}
+
+	coverURLs := h.presignCoverURLs(c, episodes)
+
+	items := make([]model.EpisodeCard, 0, len(episodes))
+	for _, ep := range episodes {
+		items = append(items, episodeToCard(ep, coverURLs))
 	}
-	c.JSON(http.StatusOK, results)
+
+	var nextCursor *string
+	if len(episodes) == limit {
+		last := episodes[len(episodes)-1]
+		cur := repository.EncodeCursor(last)
+		nextCursor = &cur
+	}
+
+	c.JSON(http.StatusOK, model.EpisodeListResponse{
+		Items:      items,
+		NextCursor: nextCursor,
+		Total:      total,
+	})
+}
+
+// GetEpisode godoc
+// @Summary      Episode-Detail
+// @Description  Get episode detail for the header area above the tabs.
+// @Tags         episodes
+// @Produce      json
+// @Param        id   path      string  true  "Episode ID (UUID)"
+// @Success      200  {object}  model.EpisodeDetailResponse
+// @Failure      404  {object}  model.ApiError
+// @Router       /episodes/{id} [get]
+func (h *Handler) GetEpisode(c *gin.Context) {
+	episode := h.getEpisodeOrAbort(c, c.Param("id"))
+	if episode == nil {
+		return
+	}
+
+	c.JSON(http.StatusOK, model.EpisodeDetailResponse{
+		Episode: h.episodeToDetail(c, *episode),
+	})
 }

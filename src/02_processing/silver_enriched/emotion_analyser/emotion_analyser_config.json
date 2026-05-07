@@ -1,0 +1,14 @@
+{
+  "model_id": "superb/wav2vec2-base-superb-er",
+  "cache_dir": "./hf_superb",
+  "sample_rate": 16000,
+  "audio_dir": "./audio_test",
+  "test_files": ["angry_example.wav", "sad_example.wav", "happy_example.wav"],
+  "ffmpeg_binary": "ffmpeg",
+  "ffmpeg_audio_channels": 1,
+  "ffmpeg_audio_rate": 16000,
+  "logging_enabled": true,
+  "log_level": "INFO",
+  "log_dir": "../logs",
+  "log_file": "emotion_analyser.log"
+}

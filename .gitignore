@@ -201,6 +201,10 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Claude - local agent instructions
+CLAUDE.md
+docs/superpowers/
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
@@ -209,3 +213,9 @@ __marimo__/
 
 bin/
 dist/
+
+# 02_processing stuff
+*.m4a
+*.wav
+*.ipynb
+**/hf_superb/

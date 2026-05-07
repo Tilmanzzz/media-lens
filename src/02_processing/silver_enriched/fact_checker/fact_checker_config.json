@@ -1,0 +1,22 @@
+{
+  "model": "gemma3:4b",
+  "temperature": 0.0,
+  "default_transcript_path": "test/fact_checker_test_transcript.txt",
+  "default_output_path": "test/output_factchecker.json",
+  "region": "us-en",
+  "max_queries_per_claim": 1,
+  "max_search_results_per_query": 3,
+  "max_sources_per_claim": 3,
+  "logging_enabled": true,
+  "log_level": "INFO",
+  "log_dir": "../logs",
+  "log_file": "fact_checker.log",
+  "allowed_verdicts": [
+    "TRUE",
+    "MOSTLY_TRUE",
+    "MISLEADING",
+    "FALSE",
+    "UNVERIFIABLE"
+  ],
+  "llm_options": {}
+}

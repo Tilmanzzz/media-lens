@@ -1,4 +1,7 @@
 services:
+  # after db schema change make sure to use
+  #   docker compose down postgres -v
+  #   docker compose up postgres --build --force-recreate
   postgres:
     image: postgres:16
     environment:
@@ -9,7 +12,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql  # auto-runs on first start
+      - ./storage/db/init.sql:/docker-entrypoint-initdb.d/init.sql  # auto-runs on first start
 
   # postgres admin tool
   pgadmin:
@@ -17,10 +20,12 @@ services:
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@admin.com
       PGADMIN_DEFAULT_PASSWORD: admin
+      
     ports:
       - "5050:80"
     volumes:
-      - ./db/pgadmin/servers.json:/pgadmin4/servers.json
+      - ./storage/db/pgadmin/servers.json:/pgadmin4/servers.json
+      - pgadmin_data:/var/lib/pgadmin
     depends_on:
       - postgres
 
@@ -66,6 +71,21 @@ services:
       - S3_ENDPOINT=http://minio:9000
       - POSTGRES_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASS}@postgres:5432/podcasts
 
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
   backend:
     build: ./src/backend
     ports:
@@ -75,6 +95,10 @@ services:
         condition: service_started
       minio:
         condition: service_healthy
+      qdrant:
+        condition: service_started
+      ollama:
+        condition: service_started
     env_file:
       - .env
     environment:
@@ -84,7 +108,13 @@ services:
       - MINIO_PASS=${MINIO_PASS}
       - BACKEND_PORT=:8080
       - CORS_ORIGINS=http://localhost:3000
+      - QDRANT_URL=http://qdrant:6333
+      - OLLAMA_URL=http://ollama:11434
+      - EMBEDDING_MODEL=qwen3-embedding:4b
 
 volumes:
   postgres_data:
   minio_data:
+  pgadmin_data:
+  qdrant_data:
+  ollama_data:

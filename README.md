@@ -116,3 +116,16 @@ flowchart TD
     BACKEND -->|serve API| FRONTEND
     FRONTEND -.->|stream audio| MINIO
 ```
+
+## Semantic Search
+
+```
+User Query → Backend → Ollama (embedding) → Qdrant (search) → Response
+```
+
+- Query wird via Ollama (`qwen3-embedding:4b`) in einen 384-dim Vektor umgewandelt
+- Qdrant-Payload speichert `episode_id`, `episode_title`, `podcast_name`, `text`, `start_time`
+- Kein PostgreSQL-Call nötig — alle Metadaten liegen im Qdrant-Payload
+- `cover_url` wird per MinIO Presigned-URL im Backend erzeugt
+- Suche erfolgt zweistufig: erst Episode-Level-Matches, dann Chunk-Highlights pro Episode
+- Endpoint: `GET /api/v1/search?q=...&limit=10&highlights=3&min_score=0.3`

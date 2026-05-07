@@ -5,61 +5,175 @@ import (
 	"time"
 )
 
-// Episode maps to the episodes table
+// Episode maps to the episodes table (internal DB model).
 type Episode struct {
-	ID          string       `json:"id" example:"550e8400-e29b-41d4-a716-446655440000"`
-	Title       string       `json:"title" example:"The Daily - Monday, April 7"`
-	PodcastID   string       `json:"podcast_id" example:"the-daily"`
-	PublishedAt sql.NullTime `json:"published_at" swaggertype:"string" example:"2026-04-07T00:00:00Z"`
-	AudioPath   string       `json:"audio_path" example:"bronze/audio/abc/def/original.mp3"`
-	XMLPath     string       `json:"xml_path" example:"bronze/podcasts/ep123.xml"`
-	IngestedAt  time.Time    `json:"ingested_at"`
+	ID              string       `json:"id"`
+	Title           string       `json:"title"`
+	PodcastID       string       `json:"podcast_id"`
+	PodcastName     string       `json:"podcast_name"`
+	PublishedAt     sql.NullTime `json:"published_at" swaggertype:"string"`
+	DurationSeconds *int         `json:"duration_seconds,omitempty"`
+	AudioPath       string       `json:"audio_path"`
+	XMLPath         string       `json:"xml_path"`
+	CoverPath       string       `json:"cover_path,omitempty"`
+	IngestedAt      time.Time    `json:"ingested_at"`
 }
 
-// PodcastSection maps to the podcast_sections table
-type PodcastSection struct {
-	ID             string    `json:"id" example:"660e8400-e29b-41d4-a716-446655440000"`
-	EpisodeID      string    `json:"episode_id" example:"550e8400-e29b-41d4-a716-446655440000"`
-	SectionIdx     int       `json:"section_idx" example:"1"`
-	Text           string    `json:"text" example:"Today we discuss..."`
-	Sentiment      string    `json:"sentiment" example:"neutral"`
-	SentimentScore float64   `json:"sentiment_score" example:"0.5"`
-	Topics         []string  `json:"topics" example:"unknown"`
-	ProcessedAt    time.Time `json:"processed_at"`
+// --- API Contract Response Models ---
+
+// EpisodeCard is displayed in the episode list.
+type EpisodeCard struct {
+	ID              string `json:"id"`
+	Title           string `json:"title"`
+	PodcastName     string `json:"podcast_name"`
+	DurationSeconds int    `json:"duration_seconds"`
+	PublishedAt     string `json:"published_at"`
+	CoverURL        string `json:"cover_url"`
 }
 
-// EpisodeWithSections is a composite response
-type EpisodeWithSections struct {
-	Episode  Episode          `json:"episode"`
-	Sections []PodcastSection `json:"sections"`
+// EpisodeListResponse is the paginated list of episodes.
+type EpisodeListResponse struct {
+	Items      []EpisodeCard `json:"items"`
+	NextCursor *string       `json:"next_cursor"`
+	Total      int           `json:"total"`
 }
 
-// PodcastSummary aggregates info for a distinct podcast_id
-type PodcastSummary struct {
-	PodcastID     string    `json:"podcast_id" example:"the-daily"`
-	EpisodeCount  int       `json:"episode_count" example:"42"`
-	LatestEpisode time.Time `json:"latest_episode"`
+// EpisodeDetail is the detail view above the tabs.
+type EpisodeDetail struct {
+	ID              string `json:"id"`
+	Title           string `json:"title"`
+	PodcastName     string `json:"podcast_name"`
+	DurationSeconds int    `json:"duration_seconds"`
+	PublishedAt     string `json:"published_at"`
+	CoverURL        string `json:"cover_url"`
 }
 
-// SearchResult represents a text search match across sections
-type SearchResult struct {
-	EpisodeID    string  `json:"episode_id" example:"550e8400-e29b-41d4-a716-446655440000"`
-	EpisodeTitle string  `json:"episode_title" example:"The Daily - Monday, April 7"`
-	SectionIdx   int     `json:"section_idx" example:"2"`
-	Snippet      string  `json:"snippet" example:"...match found in the transcript..."`
-	Sentiment    string  `json:"sentiment" example:"neutral"`
-	Score        float64 `json:"score" example:"0.95"`
+// EpisodeDetailResponse wraps EpisodeDetail.
+type EpisodeDetailResponse struct {
+	Episode EpisodeDetail `json:"episode"`
 }
 
-// HealthStatus represents the health check response
+// TopicCard represents a topic segment.
+type TopicCard struct {
+	ID        string `json:"id"`
+	Topic     string `json:"topic"`
+	StartTime int    `json:"start_time"`
+	Emotion   string `json:"emotion"`
+	Summary   string `json:"summary"`
+}
+
+// TopicsResponse wraps the topics list.
+type TopicsResponse struct {
+	EpisodeID string      `json:"episode_id"`
+	Topics    []TopicCard `json:"topics"`
+}
+
+// TranscriptLine is a single line in the transcript.
+type TranscriptLine struct {
+	ID          string `json:"id"`
+	StartTime   int    `json:"start_time"`
+	Text        string `json:"text"`
+	HasFactFlag bool   `json:"has_fact_flag"`
+}
+
+// TranscriptResponse wraps the transcript lines.
+type TranscriptResponse struct {
+	EpisodeID string           `json:"episode_id"`
+	Lines     []TranscriptLine `json:"lines"`
+}
+
+// FactCheckClaim is a fact-check entry in the sidebar.
+type FactCheckClaim struct {
+	ID          string   `json:"id"`
+	StartTime   int      `json:"start_time"`
+	Claim       string   `json:"claim"`
+	Verdict     string   `json:"verdict"`
+	Explanation string   `json:"explanation"`
+	Sources     []string `json:"sources"`
+}
+
+// FactChecksResponse wraps the fact-check claims.
+type FactChecksResponse struct {
+	EpisodeID string           `json:"episode_id"`
+	Claims    []FactCheckClaim `json:"claims"`
+}
+
+// CreateConversationRequest starts a new chat session.
+type CreateConversationRequest struct {
+	EpisodeID string `json:"episode_id" binding:"required,uuid"`
+}
+
+// CreateConversationResponse returns the new conversation ID.
+type CreateConversationResponse struct {
+	ConversationID string `json:"conversation_id"`
+}
+
+// SendMessageRequest contains the user's chat message.
+type SendMessageRequest struct {
+	Text    string              `json:"text" binding:"required,max=10000"`
+	Context *SendMessageContext `json:"context,omitempty"`
+}
+
+// SendMessageContext provides optional playback context.
+type SendMessageContext struct {
+	CurrentTime *int `json:"current_time,omitempty"`
+}
+
+// ChatStreamChunk is a single line in the NDJSON stream.
+type ChatStreamChunk struct {
+	Type    string `json:"type"`
+	Delta   string `json:"delta,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// SSEPositionEvent is pushed on segment changes.
+type SSEPositionEvent struct {
+	CurrentTime            int     `json:"current_time"`
+	ActiveTranscriptLineID string  `json:"active_transcript_line_id"`
+	ProgressPercent        float64 `json:"progress_percent"`
+}
+
+// SSEAnalysisReadyEvent is pushed when analysis completes.
+type SSEAnalysisReadyEvent struct {
+	EpisodeID string `json:"episode_id"`
+}
+
+// SearchHighlight is a matching transcript chunk.
+type SearchHighlight struct {
+	Text      string  `json:"text"`
+	StartTime int     `json:"start_time"`
+	Score     float64 `json:"score"`
+}
+
+// SearchResultItem is a single episode match.
+type SearchResultItem struct {
+	EpisodeID   string            `json:"episode_id"`
+	Title       string            `json:"title"`
+	PodcastName string            `json:"podcast_name"`
+	CoverURL    string            `json:"cover_url"`
+	Score       float64           `json:"score"`
+	Highlights  []SearchHighlight `json:"highlights"`
+}
+
+// SearchResponse wraps semantic search results.
+type SearchResponse struct {
+	Query string             `json:"query"`
+	Items []SearchResultItem `json:"items"`
+	Total int                `json:"total"`
+}
+
+// ApiError is the standardized error response.
+type ApiError struct {
+	Error   string `json:"error"`
+	Message string `json:"message"`
+	Status  int    `json:"status"`
+}
+
+// HealthStatus represents the health check response.
 type HealthStatus struct {
-	Status   string `json:"status" example:"UP"`
-	Database string `json:"database" example:"UP"`
-	MinIO    string `json:"minio" example:"UP"`
-}
-
-// AudioURLResponse wraps a presigned URL
-type AudioURLResponse struct {
-	URL       string `json:"url" example:"https://minio:9000/bronze/audio/...?X-Amz-Signature=..."`
-	ExpiresIn string `json:"expires_in" example:"1h"`
+	Status   string `json:"status"`
+	Database string `json:"database"`
+	MinIO    string `json:"minio"`
+	Qdrant   string `json:"qdrant"`
+	Ollama   string `json:"ollama"`
 }

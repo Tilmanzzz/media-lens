@@ -1,187 +1,264 @@
 basePath: /api/v1
 definitions:
-  model.AudioURLResponse:
+  model.ApiError:
     properties:
-      expires_in:
-        example: 1h
+      error:
         type: string
-      url:
-        example: https://minio:9000/bronze/audio/...?X-Amz-Signature=...
+      message:
+        type: string
+      status:
+        type: integer
+    type: object
+  model.CreateConversationRequest:
+    properties:
+      episode_id:
+        type: string
+    required:
+    - episode_id
+    type: object
+  model.CreateConversationResponse:
+    properties:
+      conversation_id:
         type: string
     type: object
-  model.Episode:
+  model.EpisodeCard:
     properties:
-      audio_path:
-        example: bronze/audio/abc/def/original.mp3
+      cover_url:
         type: string
+      duration_seconds:
+        type: integer
       id:
-        example: 550e8400-e29b-41d4-a716-446655440000
         type: string
-      ingested_at:
-        type: string
-      podcast_id:
-        example: the-daily
+      podcast_name:
         type: string
       published_at:
-        example: "2026-04-07T00:00:00Z"
         type: string
       title:
-        example: The Daily - Monday, April 7
-        type: string
-      xml_path:
-        example: bronze/podcasts/ep123.xml
         type: string
     type: object
-  model.EpisodeWithSections:
+  model.EpisodeDetail:
+    properties:
+      cover_url:
+        type: string
+      duration_seconds:
+        type: integer
+      id:
+        type: string
+      podcast_name:
+        type: string
+      published_at:
+        type: string
+      title:
+        type: string
+    type: object
+  model.EpisodeDetailResponse:
     properties:
       episode:
-        $ref: '#/definitions/model.Episode'
-      sections:
+        $ref: '#/definitions/model.EpisodeDetail'
+    type: object
+  model.EpisodeListResponse:
+    properties:
+      items:
         items:
-          $ref: '#/definitions/model.PodcastSection'
+          $ref: '#/definitions/model.EpisodeCard'
         type: array
+      next_cursor:
+        type: string
+      total:
+        type: integer
+    type: object
+  model.FactCheckClaim:
+    properties:
+      claim:
+        type: string
+      explanation:
+        type: string
+      id:
+        type: string
+      sources:
+        items:
+          type: string
+        type: array
+      start_time:
+        type: integer
+      verdict:
+        type: string
+    type: object
+  model.FactChecksResponse:
+    properties:
+      claims:
+        items:
+          $ref: '#/definitions/model.FactCheckClaim'
+        type: array
+      episode_id:
+        type: string
     type: object
   model.HealthStatus:
     properties:
       database:
-        example: UP
         type: string
       minio:
-        example: UP
         type: string
       status:
-        example: UP
         type: string
     type: object
-  model.PodcastSection:
+  model.SendMessageContext:
     properties:
-      episode_id:
-        example: 550e8400-e29b-41d4-a716-446655440000
+      current_time:
+        type: integer
+    type: object
+  model.SendMessageRequest:
+    properties:
+      context:
+        $ref: '#/definitions/model.SendMessageContext'
+      text:
+        maxLength: 10000
+        type: string
+    required:
+    - text
+    type: object
+  model.TopicCard:
+    properties:
+      emotion:
         type: string
       id:
-        example: 660e8400-e29b-41d4-a716-446655440000
         type: string
-      processed_at:
-        type: string
-      section_idx:
-        example: 1
+      start_time:
         type: integer
-      sentiment:
-        example: neutral
+      summary:
         type: string
-      sentiment_score:
-        example: 0.5
-        type: number
-      text:
-        example: Today we discuss...
-        type: string
-      topics:
-        example:
-        - unknown
-        items:
-          type: string
-        type: array
-    type: object
-  model.PodcastSummary:
-    properties:
-      episode_count:
-        example: 42
-        type: integer
-      latest_episode:
-        type: string
-      podcast_id:
-        example: the-daily
+      topic:
         type: string
     type: object
-  model.SearchResult:
+  model.TopicsResponse:
     properties:
       episode_id:
-        example: 550e8400-e29b-41d4-a716-446655440000
         type: string
-      episode_title:
-        example: The Daily - Monday, April 7
+      topics:
+        items:
+          $ref: '#/definitions/model.TopicCard'
+        type: array
+    type: object
+  model.TranscriptLine:
+    properties:
+      has_fact_flag:
+        type: boolean
+      id:
         type: string
-      score:
-        example: 0.95
-        type: number
-      section_idx:
-        example: 2
+      start_time:
         type: integer
-      sentiment:
-        example: neutral
+      text:
         type: string
-      snippet:
-        example: '...match found in the transcript...'
+    type: object
+  model.TranscriptResponse:
+    properties:
+      episode_id:
         type: string
+      lines:
+        items:
+          $ref: '#/definitions/model.TranscriptLine'
+        type: array
     type: object
 host: localhost:8080
 info:
   contact: {}
-  description: Social Listening tool for podcasts and media.
-  title: Media-Lens API
+  description: Podcast analysis backend — episodes, topics, transcripts, fact-checks,
+    chat.
+  title: Audiolens API
   version: "1.0"
 paths:
-  /audio-url/{id}:
-    get:
-      description: Generate a presigned MinIO URL for streaming an episode's audio
-        file.
+  /chat/conversations:
+    post:
+      consumes:
+      - application/json
+      description: Create a new chat conversation for an episode.
       parameters:
-      - description: Episode ID (UUID)
+      - description: Episode ID
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/model.CreateConversationRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.CreateConversationResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/model.ApiError'
+      summary: Neue Chat-Session starten
+      tags:
+      - chat
+  /chat/conversations/{id}/messages:
+    post:
+      consumes:
+      - application/json
+      description: Send a message and receive a stubbed NDJSON streaming response.
+      parameters:
+      - description: Conversation ID (UUID)
         in: path
         name: id
         required: true
         type: string
+      - description: User message
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/model.SendMessageRequest'
       produces:
-      - application/json
+      - application/x-ndjson
       responses:
         "200":
-          description: OK
+          description: NDJSON stream of ChatStreamChunk
+        "400":
+          description: Bad Request
           schema:
-            $ref: '#/definitions/model.AudioURLResponse'
+            $ref: '#/definitions/model.ApiError'
         "404":
           description: Not Found
           schema:
-            additionalProperties:
-              type: string
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Get a presigned audio URL
+            $ref: '#/definitions/model.ApiError'
+      summary: Nachricht senden — Antwort kommt als Stream
       tags:
-      - audio
+      - chat
   /episodes:
     get:
-      description: Get episodes, optionally filtered by podcast_id.
+      description: Cursor-based paginated episode list with optional free-text search.
       parameters:
-      - description: Filter by podcast ID
+      - description: Free-text search on title and podcast name
         in: query
-        name: podcast_id
+        name: q
         type: string
+      - description: Cursor from previous response
+        in: query
+        name: cursor
+        type: string
+      - description: Page size (default 20, max 100)
+        in: query
+        name: limit
+        type: integer
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/model.Episode'
-            type: array
-        "500":
-          description: Internal Server Error
+            $ref: '#/definitions/model.EpisodeListResponse'
+        "400":
+          description: Bad Request
           schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: List episodes
+            $ref: '#/definitions/model.ApiError'
+      summary: Episode-Liste
       tags:
       - episodes
   /episodes/{id}:
     get:
-      description: Retrieve an episode and all its podcast sections by episode ID.
+      description: Get episode detail for the header area above the tabs.
       parameters:
       - description: Episode ID (UUID)
         in: path
@@ -194,25 +271,17 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/model.EpisodeWithSections'
+            $ref: '#/definitions/model.EpisodeDetailResponse'
         "404":
           description: Not Found
           schema:
-            additionalProperties:
-              type: string
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Get a single episode with its sections
+            $ref: '#/definitions/model.ApiError'
+      summary: Episode-Detail
       tags:
       - episodes
-  /episodes/{id}/sections:
+  /episodes/{id}/fact-checks:
     get:
-      description: Retrieve all podcast sections for a given episode ID.
+      description: Get fact-check claims for an episode.
       parameters:
       - description: Episode ID (UUID)
         in: path
@@ -225,18 +294,84 @@ paths:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/model.PodcastSection'
-            type: array
-        "500":
-          description: Internal Server Error
+            $ref: '#/definitions/model.FactChecksResponse'
+        "404":
+          description: Not Found
           schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Get sections for an episode
+            $ref: '#/definitions/model.ApiError'
+      summary: Fact-Check-Flags für die Sidebar
       tags:
-      - sections
+      - fact-checks
+  /episodes/{id}/sync:
+    get:
+      description: Server-Sent Events stream for playback synchronization (stubbed).
+      parameters:
+      - description: Episode ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/model.ApiError'
+      summary: Playback-Position per SSE
+      tags:
+      - sync
+  /episodes/{id}/topics:
+    get:
+      description: Get topics for an episode. Returns 202 if analysis is not ready
+        yet.
+      parameters:
+      - description: Episode ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.TopicsResponse'
+        "202":
+          description: Analysis not ready
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/model.ApiError'
+      summary: Themen für den Themen-Tab
+      tags:
+      - topics
+  /episodes/{id}/transcript:
+    get:
+      description: Get transcript lines for an episode. Lines are annotated with has_fact_flag.
+      parameters:
+      - description: Episode ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.TranscriptResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/model.ApiError'
+      summary: Transkript-Zeilen
+      tags:
+      - transcript
   /health:
     get:
       description: Get the health status of the API, including database and MinIO
@@ -255,62 +390,4 @@ paths:
       summary: Health check
       tags:
       - health
-  /podcasts:
-    get:
-      description: Get a list of distinct podcasts with episode counts.
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/model.PodcastSummary'
-            type: array
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: List all podcasts
-      tags:
-      - podcasts
-  /search:
-    get:
-      description: Search all podcast sections for a keyword or phrase using ILIKE.
-      parameters:
-      - description: Search query
-        in: query
-        name: q
-        required: true
-        type: string
-      - description: Max results (default 20, max 100)
-        in: query
-        name: limit
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/model.SearchResult'
-            type: array
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Search through section text
-      tags:
-      - search
 swagger: "2.0"
