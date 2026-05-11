@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import psycopg
-from psycopg.rows import dict_row
 
 VECTOR_SIZE = 384
 

@@ -106,15 +106,6 @@ func (c *PgVectorClient) SearchChunks(ctx context.Context, vector []float64, epi
 	return chunks, rows.Err()
 }
 
-func (c *PgVectorClient) HealthCheck(ctx context.Context) error {
-	var result int
-	err := c.db.QueryRowContext(ctx, "SELECT 1 FROM pg_extension WHERE extname = 'vector'").Scan(&result)
-	if err != nil {
-		return fmt.Errorf("pgvector health: %w", err)
-	}
-	return nil
-}
-
 func toFloat32(f64 []float64) []float32 {
 	f32 := make([]float32, len(f64))
 	for i, v := range f64 {
