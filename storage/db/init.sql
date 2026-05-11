@@ -118,7 +118,7 @@ CREATE TABLE embeddings (
 
 CREATE INDEX idx_embeddings_episode_id ON embeddings(episode_id);
 CREATE INDEX idx_embeddings_level ON embeddings(embedding_level);
-CREATE INDEX idx_embeddings_vector ON embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX idx_embeddings_vector ON embeddings USING hnsw (embedding vector_cosine_ops);
 
 
 
