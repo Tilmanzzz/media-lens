@@ -82,7 +82,7 @@ func (c *PgVectorClient) SearchChunks(ctx context.Context, vector []float64, epi
 		       1 - (embedding <=> $1::vector) AS score
 		FROM embeddings
 		WHERE embedding_level = 'chunk'
-		  AND episode_id::text IN (%s)
+		  AND episode_id IN (%s)
 		  AND 1 - (embedding <=> $1::vector) >= $2
 		ORDER BY embedding <=> $1::vector
 		LIMIT %s`,
