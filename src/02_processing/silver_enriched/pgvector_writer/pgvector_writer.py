@@ -14,7 +14,10 @@ VECTOR_SIZE = 384
 INSERT_SQL = """
 INSERT INTO embeddings (episode_id, chunk_id, embedding_level, embedding, text, start_time, episode_title, podcast_name, podcast_id, cover_path)
 VALUES (%(episode_id)s, %(chunk_id)s, %(embedding_level)s, %(embedding)s::vector, %(text)s, %(start_time)s, %(episode_title)s, %(podcast_name)s, %(podcast_id)s, %(cover_path)s)
-ON CONFLICT (id) DO NOTHING
+ON CONFLICT (episode_id, chunk_id, embedding_level)
+DO UPDATE SET embedding = EXCLUDED.embedding, text = EXCLUDED.text, start_time = EXCLUDED.start_time,
+             episode_title = EXCLUDED.episode_title, podcast_name = EXCLUDED.podcast_name,
+             podcast_id = EXCLUDED.podcast_id, cover_path = EXCLUDED.cover_path
 """
 
 

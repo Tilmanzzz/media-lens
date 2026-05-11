@@ -112,7 +112,8 @@ CREATE TABLE embeddings (
   podcast_name    TEXT,
   podcast_id      TEXT,
   cover_path      TEXT,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (episode_id, chunk_id, embedding_level)
 );
 
 CREATE INDEX idx_embeddings_episode_id ON embeddings(episode_id);
