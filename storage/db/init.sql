@@ -6,8 +6,26 @@ CREATE TYPE stage_status   AS ENUM ('pending', 'running',    'done', 'failed');
 
 CREATE TYPE pipeline_step_type       AS ENUM ('ingestion', 'preprocessing', 'processing');
 
--- Functions
-
+-- One row per podcast feed.
+-- Manually inserted for now; the update script polls all rows here.
+CREATE TABLE podcasts (
+  id                  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  feed_url            TEXT        NOT NULL UNIQUE,
+  title               TEXT,
+  description         TEXT,
+  image_url           TEXT,
+  -- Polling state
+  last_fetched_at     TIMESTAMPTZ,
+  -- Content state
+  last_content_at     TIMESTAMPTZ,
+  -- Stored from HTTP response headers; used for conditional GET on next poll.
+  -- Send If-None-Match / If-Modified-Since → skip processing on 304.
+  feed_etag           TEXT,
+  feed_last_modified  TEXT,
+  created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  max_episodes        INT DEFAULT NULL
+);
 -- One row per podcast episode.
 -- guid (from RSS <guid>) + podcast_id is the natural deduplication key,
 -- enabling safe upserts during feed polling.
@@ -133,26 +151,6 @@ CREATE TABLE pipeline_step(
 );
 
 
--- One row per podcast feed.
--- Manually inserted for now; the update script polls all rows here.
-CREATE TABLE podcasts (
-  id                  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  feed_url            TEXT        NOT NULL UNIQUE,
-  title               TEXT,
-  description         TEXT,
-  image_url           TEXT,
-  -- Polling state
-  last_fetched_at     TIMESTAMPTZ,
-  -- Content state
-  last_content_at     TIMESTAMPTZ,
-  -- Stored from HTTP response headers; used for conditional GET on next poll.
-  -- Send If-None-Match / If-Modified-Since → skip processing on 304.
-  feed_etag           TEXT,
-  feed_last_modified  TEXT,
-  created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-  updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-  max_episodes        INT DEFAULT NULL
-);
 
 
 
