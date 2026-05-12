@@ -29,7 +29,7 @@ type Handler struct {
 	Config        *config.Config
 	DB            *sql.DB
 	Embedder      *embedder.OllamaClient
-	VectorStore   *vectorstore.QdrantClient
+	VectorStore   *vectorstore.PgVectorClient
 }
 
 // respondError sends a standardized ApiError JSON response.

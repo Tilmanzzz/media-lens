@@ -3,7 +3,7 @@ services:
   #   docker compose down postgres -v
   #   docker compose up postgres --build --force-recreate
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: "podcasts"
       POSTGRES_USER: ${POSTGRES_USER}
@@ -55,7 +55,7 @@ services:
       - .env
 
   processing_silver:
-    build: ./src/02_processing/02_silver/
+    build: ./src/02_processing/silver/
     depends_on:
       postgres:
         condition: service_started
@@ -70,14 +70,6 @@ services:
       # You can also set the S3 endpoint here for consistency
       - S3_ENDPOINT=http://minio:9000
       - POSTGRES_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASS}@postgres:5432/podcasts
-
-  qdrant:
-    image: qdrant/qdrant:latest
-    ports:
-      - "6333:6333"
-      - "6334:6334"
-    volumes:
-      - qdrant_data:/qdrant/storage
 
   ollama:
     image: ollama/ollama:latest
@@ -95,8 +87,6 @@ services:
         condition: service_started
       minio:
         condition: service_healthy
-      qdrant:
-        condition: service_started
       ollama:
         condition: service_started
     env_file:
@@ -108,7 +98,6 @@ services:
       - MINIO_PASS=${MINIO_PASS}
       - BACKEND_PORT=:8080
       - CORS_ORIGINS=http://localhost:3000
-      - QDRANT_URL=http://qdrant:6333
       - OLLAMA_URL=http://ollama:11434
       - EMBEDDING_MODEL=qwen3-embedding:4b
 
@@ -116,5 +105,4 @@ volumes:
   postgres_data:
   minio_data:
   pgadmin_data:
-  qdrant_data:
   ollama_data:

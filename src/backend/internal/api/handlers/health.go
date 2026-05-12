@@ -20,7 +20,6 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 		Status:   "UP",
 		Database: "UP",
 		MinIO:    "UP",
-		Qdrant:   "UP",
 		Ollama:   "UP",
 	}
 
@@ -32,11 +31,6 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 	if _, err := h.Minio.BucketExists(c.Request.Context(), h.Config.MinioBucket); err != nil {
 		status.Status = "DEGRADED"
 		status.MinIO = "DOWN"
-	}
-
-	if err := h.VectorStore.HealthCheck(c.Request.Context()); err != nil {
-		status.Status = "DEGRADED"
-		status.Qdrant = "DOWN"
 	}
 
 	if err := h.Embedder.HealthCheck(c.Request.Context()); err != nil {

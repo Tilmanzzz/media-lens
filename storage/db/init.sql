@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS vector;
+
 CREATE TYPE episode_status AS ENUM ('pending', 'processing', 'done', 'failed');
 CREATE TYPE stage_status AS ENUM ('pending', 'running', 'done', 'failed');
 
@@ -97,6 +99,26 @@ CREATE TABLE conversations (
 );
 
 CREATE INDEX idx_conversations_episode_id ON conversations(episode_id);
+
+CREATE TABLE embeddings (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  episode_id      UUID NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+  chunk_id        TEXT,
+  embedding_level TEXT NOT NULL,
+  embedding       vector(384) NOT NULL,
+  text            TEXT,
+  start_time      INTEGER DEFAULT 0,
+  episode_title   TEXT,
+  podcast_name    TEXT,
+  podcast_id      TEXT,
+  cover_path      TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (episode_id, chunk_id, embedding_level)
+);
+
+CREATE INDEX idx_embeddings_episode_id ON embeddings(episode_id);
+CREATE INDEX idx_embeddings_level ON embeddings(embedding_level);
+CREATE INDEX idx_embeddings_vector ON embeddings USING hnsw (embedding vector_cosine_ops);
 
 
 

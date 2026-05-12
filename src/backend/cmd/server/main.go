@@ -55,9 +55,9 @@ func main() {
 		log.Fatalf("Failed to connect to MinIO: %v", err)
 	}
 
-	// Create Ollama embedder and Qdrant client
+	// Create Ollama embedder and pgvector client
 	ollamaClient := embedder.NewOllamaClient(cfg.OllamaURL, cfg.EmbeddingModel)
-	qdrantClient := vectorstore.NewQdrantClient(cfg.QdrantURL, "podcast_embeddings")
+	pgvectorClient := vectorstore.NewPgVectorClient(db)
 
 	// Create repositories
 	episodeRepo := repository.NewEpisodeRepository(db)
@@ -76,7 +76,7 @@ func main() {
 		Config:        cfg,
 		DB:            db,
 		Embedder:      ollamaClient,
-		VectorStore:   qdrantClient,
+		VectorStore:   pgvectorClient,
 	}
 
 	r := gin.Default()
