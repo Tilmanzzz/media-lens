@@ -1,3 +1,4 @@
+# Builder
 FROM golang:1.26.1-alpine AS builder
 WORKDIR /app
 
@@ -6,11 +7,20 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o ingestor ./cmd/ingestor/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o ingestion 01_ingestion/cmd/ingestion/main.go
 
-FROM alpine:3.20.9
+RUN CGO_ENABLED=0 GOOS=linux go build -o insertion 01_ingestion/cmd/insertion/main.go
+
+# Ingestion
+FROM alpine:3.20.9 AS ingestion
 WORKDIR /root/
+COPY --from=builder /app/ingestion .
+# The ingestor just runs in a loop, no args needed
+CMD ["./ingestion"]
 
-COPY --from=builder /app/ingestor .
-
-CMD ["./ingestor"]
+# Insertion
+FROM alpine:3.20.9 AS insertion
+WORKDIR /root/
+COPY --from=builder /app/insertion .
+# ENTRYPOINT allows us to pass the <rss_url> as an argument easily
+ENTRYPOINT ["./insertion"]

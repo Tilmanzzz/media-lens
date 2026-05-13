@@ -1,57 +1,70 @@
 CREATE EXTENSION IF NOT EXISTS vector;
+-- Types
 
 CREATE TYPE episode_status AS ENUM ('pending', 'processing', 'done', 'failed');
-CREATE TYPE stage_status AS ENUM ('pending', 'running', 'done', 'failed');
+CREATE TYPE stage_status   AS ENUM ('pending', 'running',    'done', 'failed');
 
--- sorted nach ingestion_start_ts descending -> grab last batch
--- store exception? -- maybe later
-CREATE TABLE pipeline_runs (
-  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  ingestion_start_ts      TIMESTAMPTZ,
-  ingestion_fin_ts        TIMESTAMPTZ,
-  ingestion_status        stage_status NOT NULL DEFAULT 'pending',
-  preprocessing_start_ts  TIMESTAMPTZ,
-  preprocessing_fin_ts    TIMESTAMPTZ,
-  preprocessing_status    stage_status NOT NULL DEFAULT 'pending',
-  processing_start_ts     TIMESTAMPTZ,
-  processing_fin_ts       TIMESTAMPTZ,
-  processing_status       stage_status NOT NULL DEFAULT 'pending',
-  created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+CREATE TYPE pipeline_step_type       AS ENUM ('ingestion', 'preprocessing', 'processing');
+
+-- One row per podcast feed.
+-- Manually inserted for now; the update script polls all rows here.
+CREATE TABLE podcasts (
+  id                  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  feed_url            TEXT        NOT NULL UNIQUE,
+  title               TEXT,
+  description         TEXT,
+  image_url           TEXT,
+  -- Polling state
+  last_fetched_at     TIMESTAMPTZ,
+  -- Content state
+  last_content_at     TIMESTAMPTZ,
+  -- Stored from HTTP response headers; used for conditional GET on next poll.
+  -- Send If-None-Match / If-Modified-Since → skip processing on 304.
+  feed_etag           TEXT,
+  feed_last_modified  TEXT,
+  created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  max_episodes        INT DEFAULT NULL
 );
-
-
+-- One row per podcast episode.
+-- guid (from RSS <guid>) + podcast_id is the natural deduplication key,
+-- enabling safe upserts during feed polling.
 CREATE TABLE episodes (
-  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  batch_id         UUID REFERENCES pipeline_runs(id),
-  title            TEXT NOT NULL,
-  podcast_id       TEXT,
-  podcast_name     TEXT,
-  published_at     TIMESTAMPTZ,
+  id            UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  podcast_id    UUID          NOT NULL REFERENCES podcasts(id)      ON DELETE CASCADE,
+  guid          TEXT          NOT NULL,                             -- RSS <guid> --> primary key?
+  title         TEXT          NOT NULL,
+  published_at  TIMESTAMPTZ,
   duration_seconds INTEGER,
-  audio_path       TEXT,
-  xml_path         TEXT,
-  transcript_path  TEXT,
-  cover_path       TEXT,
-  status           episode_status NOT NULL DEFAULT 'pending',
-  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  ingested_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+
+  -- MinIO object keys (bronze / silver)
+  audio_key     TEXT          NOT NULL,                             -- bronze: raw audio
+  xml_key       TEXT,                                               -- bronze: raw RSS XML
+  transcript_key TEXT,                                              -- silver: Whisper JSON (set by processing)
+  cover_key     TEXT,
+  status        episode_status NOT NULL DEFAULT 'pending',
+  ingested_at   TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  enclosure_url TEXT,
+  summary       TEXT,
+  CONSTRAINT uq_episodes_podcast_guid UNIQUE (podcast_id, guid)
 );
 
 
+-- One row per transcript section produced by the processing module.
+-- The processing module has full write ownership of this table and of
 CREATE TABLE podcast_sections (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  episode_id      UUID NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
-  section_idx     INT NOT NULL,
-  text            TEXT,
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  episode_id      UUID        NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+  section_idx     INT         NOT NULL,
+  transcript      TEXT,
   sentiment       TEXT,
-  sentiment_score FLOAT,
+  sentiment_score REAL,
   topics          TEXT[],
+  summary         TEXT,
   processed_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_sections_episode_id ON podcast_sections(episode_id);
-CREATE INDEX idx_episodes_batch_id ON episodes(batch_id);
-CREATE INDEX idx_episodes_status ON episodes(status);
 
 
 CREATE TYPE emotion_label AS ENUM ('positive', 'neutral', 'negative');
@@ -123,23 +136,59 @@ CREATE INDEX idx_embeddings_vector ON embeddings USING hnsw (embedding vector_co
 
 
 
--- delta load full load
 
----
--- 12 Uhr Podcast release
+-- Tables
+-- One row per ingestion + processing run.
+-- for now one script that combines ingestion and processing
+-- one function call called by postgres scheduler that owns pipeline_runs table
+CREATE TABLE pipeline_step(
+  id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  start_ts              TIMESTAMPTZ,
+  fin_ts                TIMESTAMPTZ,
+  status                stage_status NOT NULL DEFAULT 'pending',
+  created_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  step_type             pipeline_step_type 
+);
 
--- 12:05 ingestion start -> start_ts der max_batch id
--- 12:10 Änderung der Quelle (Titel, etc) 
--- 12:30 processed -> end_ts der max batch id --> done for now
---> Event signals Change / loop fetch (fetch all entries where batch_start_ts < 13:00)
---> annahme update_ts für jedes field in quelle
---> prüfen welche fields sich geändert haben -> update_ts (quelle) > batch_start_ts (topf)
-  --> returns count: über 5 lohnt sich drunter nicht oder so
---> update
 
 
 
--------
---> 
 
+CREATE TABLE claims (
+  id                  UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  section_id          UUID    NOT NULL REFERENCES podcast_sections(id) ON DELETE CASCADE,
+  verdict             TEXT,
+  verdict_explanation TEXT,
+  sources             TEXT[],
+  claim               TEXT
+);
+
+
+
+-- Indexes
+
+CREATE INDEX idx_episodes_podcast_id  ON episodes(podcast_id);
+CREATE INDEX idx_episodes_status      ON episodes(status);
+CREATE INDEX idx_sections_episode_id  ON podcast_sections(episode_id);
+CREATE INDEX idx_claims_section_id    ON claims(section_id);
+
+
+-- automatic timestamp updates
+
+CREATE OR REPLACE FUNCTION trigger_set_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE TRIGGER set_timestamp_podcasts
+  BEFORE UPDATE ON podcasts
+  FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
+ 
+CREATE TRIGGER set_timestamp_episodes
+  BEFORE UPDATE ON episodes
+  FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
 

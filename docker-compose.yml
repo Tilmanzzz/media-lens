@@ -1,26 +1,26 @@
 services:
-  # after db schema change make sure to use
-  #   docker compose down postgres -v
-  #   docker compose up postgres --build --force-recreate
   postgres:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_DB: "podcasts"
+      POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASS}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./storage/db/init.sql:/docker-entrypoint-initdb.d/init.sql  # auto-runs on first start
+      - ./storage/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # postgres admin tool
   pgadmin:
     image: dpage/pgadmin4
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@admin.com
       PGADMIN_DEFAULT_PASSWORD: admin
-      
     ports:
       - "5050:80"
     volumes:
@@ -29,13 +29,11 @@ services:
     depends_on:
       - postgres
 
-  # datalake
   minio:
     image: minio/minio
-    ports: [
-      9000:9000,
-      9001:9001
-    ]
+    ports:
+      - "9000:9000"
+      - "9001:9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_PASS}
@@ -45,31 +43,86 @@ services:
       interval: 5s
       timeout: 5s
       retries: 1
-  
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   ingestion:
-    build: ./src/01_ingestion
+    build: 
+      context: ./src
+      dockerfile: ./01_ingestion/Dockerfile
+      target: ingestion
+    depends_on:
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env    
+    environment:
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - POSTGRES_URL=${POSTGRES_URL}
+      - REDIS_ADDR=${REDIS_ADDR}
+
+  insertion:
+    build: 
+      context: ./src/
+      dockerfile: ./01_ingestion/Dockerfile
+      target: insertion
     depends_on:
       minio:
         condition: service_healthy
     env_file:
-      - .env
-
+      - .env    
+    profiles: ["tools"]
+    environment:
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - POSTGRES_URL=${POSTGRES_URL}
+      - REDIS_ADDR=${REDIS_ADDR}   
+  transcription:
+    build: 
+      context: ./src/
+      dockerfile: ./02_processing/transcription/Dockerfile
+    depends_on:
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - POSTGRES_URL=${POSTGRES_URL}
+      - REDIS_ADDR=${REDIS_ADDR}
   processing_silver:
     build: ./src/02_processing/silver/
     depends_on:
       postgres:
-        condition: service_started
+        condition: service_healthy
       minio:
         condition: service_healthy
     env_file:
       - .env
     environment:
-      # This syntax maps the .env variable to the container
       - MINIO_USER=${MINIO_USER}
       - MINIO_PASS=${MINIO_PASS}
-      # You can also set the S3 endpoint here for consistency
       - S3_ENDPOINT=http://minio:9000
-      - POSTGRES_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASS}@postgres:5432/podcasts
+      - POSTGRES_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASS}@postgres:5432/${POSTGRES_DB}
 
   ollama:
     image: ollama/ollama:latest
@@ -84,7 +137,7 @@ services:
       - "8080:8080"
     depends_on:
       postgres:
-        condition: service_started
+        condition: service_healthy
       minio:
         condition: service_healthy
       ollama:
@@ -92,8 +145,8 @@ services:
     env_file:
       - .env
     environment:
-      - POSTGRES_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASS}@postgres:5432/podcasts?sslmode=disable
-      - MINIO_ENDPOINT=minio:9000
+      - POSTGRES_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASS}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
       - MINIO_USER=${MINIO_USER}
       - MINIO_PASS=${MINIO_PASS}
       - BACKEND_PORT=:8080
