@@ -108,8 +108,10 @@ func main() {
 
 			// bundled db operation - first minio, postgres after
 			err := func() error {
-				// ... (HTTP request setup) ...
 				req, err := http.NewRequestWithContext(ctx, "GET", enclosureURL, nil)
+				if err != nil {
+					return err
+				}
 				req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; PodcastBot/1.0)")
 				req.Header.Set("Accept", "audio/mpeg, audio/*;q=0.9, */*;q=0.8")
 
@@ -138,7 +140,7 @@ func main() {
 					GUID:         item.GUID,
 					Title:        item.Title,
 					AudioKey:     audioKey,
-					Status:       "pending",
+					Status:       "pending_transcription",
 					PublishedAt:  item.PublishedParsed,
 					EnclosureURL: enclosureURL,
 				})
@@ -148,10 +150,11 @@ func main() {
 					return fmt.Errorf("db upsert failed: %w", err)
 				}
 
+				// OPERATION C: Push to Redis Stream
 				err = q.EnqueueTranscription(ctx, episodeID)
 				if err != nil {
-					// We log this but don't return an error because the file is already
-					// saved. We could implement a "retry" status in the DB later.
+					// Logged but not failed. A scheduled job can sweep the DB for
+					// "pending_transcription" records not present in the stream.
 					log.Printf("Warning: Failed to enqueue %s: %v", item.GUID, err)
 				}
 

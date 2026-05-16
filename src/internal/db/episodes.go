@@ -40,7 +40,42 @@ func (s *Store) GetEpisodeByID(ctx context.Context, id string) (Episode, error) 
 	return ep, nil
 }
 
-func (s *Store) MarkTranscribed(ctx context.Context, id string, transcriptKey string) error {
+func (s *Store) MarkPendingSectioning(ctx context.Context, id string) error {
+	query := `
+		UPDATE episodes
+		SET status = 'pending_sectioning'
+		WHERE id = $1
+	`
+	result, err := s.Pool.Exec(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to update episode status: %w", err)
+	}
+	// check if the episode existed
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("no episode found with id: %s", id)
+	}
+	return nil
+}
+
+func (s *Store) MarkPendingTranscription(ctx context.Context, id string) error {
+	query := `
+		UPDATE episodes
+		SET status = 'pending_transcription'
+		WHERE id = $1
+	`
+	result, err := s.Pool.Exec(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to update episode status: %w", err)
+	}
+	// check if the episode existed
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("no episode found with id: %s", id)
+	}
+	return nil
+}
+
+// sets the transcriptKey
+func (s *Store) SetTranscriptKey(ctx context.Context, id string, transcriptKey string) error {
 	query := `
 		UPDATE episodes 
 		SET transcript_key = $1

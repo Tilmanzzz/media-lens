@@ -1,7 +1,7 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 -- Types
 
-CREATE TYPE episode_status AS ENUM ('pending', 'processing', 'done', 'failed');
+CREATE TYPE episode_status AS ENUM ('pending', 'pending_transcription', 'pending_sectioning', 'processing', 'done', 'failed');
 CREATE TYPE stage_status   AS ENUM ('pending', 'running',    'done', 'failed');
 
 CREATE TYPE pipeline_step_type       AS ENUM ('ingestion', 'preprocessing', 'processing');
@@ -51,51 +51,47 @@ CREATE TABLE episodes (
 );
 
 
--- One row per transcript section produced by the processing module.
--- The processing module has full write ownership of this table and of
-CREATE TABLE podcast_sections (
-  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  episode_id      UUID        NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
-  section_idx     INT         NOT NULL,
-  transcript      TEXT,
-  sentiment       TEXT,
+CREATE TYPE sentiment_label AS ENUM ('positive', 'neutral', 'negative');
+
+CREATE TABLE podcast_chapters (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  episode_id      UUID NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+  chapter_idx     INT NOT NULL,  -- Sequential ordering (1, 2, 3...)
+  start_time      REAL NOT NULL, -- Anchor to the transcript timeline
+  end_time        REAL NOT NULL, 
+  title           TEXT,          -- Short display title for UI markers (e.g., "Introduction", "The Chunking Dilemma")
+  sentiment       sentiment_label NOT NULL DEFAULT 'neutral',
   sentiment_score REAL,
-  topics          TEXT[],
-  summary         TEXT,
+  topics          TEXT[],        -- Array of core keywords/entities
+  summary         TEXT,          -- Paragraph description of the chapter
   processed_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Index for syncing chapter boundaries with the active audio player timestamp
+CREATE INDEX idx_podcast_chapters_episode_time 
+ON podcast_chapters(episode_id, start_time);
 
 
-CREATE TYPE emotion_label AS ENUM ('positive', 'neutral', 'negative');
+CREATE TABLE transcript_segments (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  episode_id  UUID NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+  start_time  REAL NOT NULL, -- Start time in seconds (e.g., 12.5)
+  end_time    REAL NOT NULL, -- End time in seconds (e.g., 15.2)
+  text        TEXT NOT NULL, -- The full string of the segment
+  words       JSONB,         -- Array of word-level timestamps: [{"w": "Hello", "s": 12.5, "e": 12.8}]
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Index for highly performant frontend timeline querying
+CREATE INDEX idx_transcript_segments_episode_time 
+ON transcript_segments(episode_id, start_time);
+
 CREATE TYPE fact_verdict AS ENUM ('TRUE', 'MOSTLY_TRUE', 'MISLEADING', 'FALSE', 'UNVERIFIABLE');
-
-CREATE TABLE topics (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  episode_id  UUID NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
-  topic       TEXT NOT NULL,
-  start_time  INTEGER NOT NULL,
-  emotion     emotion_label NOT NULL DEFAULT 'neutral',
-  summary     TEXT,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX idx_topics_episode_id ON topics(episode_id);
-
-CREATE TABLE transcript_lines (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  episode_id  UUID NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
-  start_time  INTEGER NOT NULL,
-  text        TEXT NOT NULL,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX idx_transcript_lines_episode_id ON transcript_lines(episode_id);
 
 CREATE TABLE fact_checks (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   episode_id  UUID NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
-  start_time  INTEGER NOT NULL,
+  start_time  REAL NOT NULL, -- Updated from INTEGER
   claim       TEXT NOT NULL,
   verdict     fact_verdict NOT NULL DEFAULT 'UNVERIFIABLE',
   explanation TEXT,
@@ -120,7 +116,7 @@ CREATE TABLE embeddings (
   embedding_level TEXT NOT NULL,
   embedding       vector(384) NOT NULL,
   text            TEXT,
-  start_time      INTEGER DEFAULT 0,
+  start_time      REAL DEFAULT 0.0, -- Updated from INTEGER
   episode_title   TEXT,
   podcast_name    TEXT,
   podcast_id      TEXT,
@@ -156,7 +152,7 @@ CREATE TABLE pipeline_step(
 
 CREATE TABLE claims (
   id                  UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
-  section_id          UUID    NOT NULL REFERENCES podcast_sections(id) ON DELETE CASCADE,
+  chapter_id UUID    NOT NULL REFERENCES podcast_chapters(id) ON DELETE CASCADE,
   verdict             TEXT,
   verdict_explanation TEXT,
   sources             TEXT[],
@@ -169,8 +165,7 @@ CREATE TABLE claims (
 
 CREATE INDEX idx_episodes_podcast_id  ON episodes(podcast_id);
 CREATE INDEX idx_episodes_status      ON episodes(status);
-CREATE INDEX idx_sections_episode_id  ON podcast_sections(episode_id);
-CREATE INDEX idx_claims_section_id    ON claims(section_id);
+CREATE INDEX idx_claims_chapter_id ON claims(chapter_id);
 
 
 -- automatic timestamp updates
