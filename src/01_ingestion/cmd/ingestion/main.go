@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/mmcdole/gofeed"
-	"github.com/tilmanzzz/audio-lens/internal/blob"
-	"github.com/tilmanzzz/audio-lens/internal/db"
-	"github.com/tilmanzzz/audio-lens/internal/queue"
+	"github.com/tilmanzzz/audio-lens/internal/go/blob"
+	"github.com/tilmanzzz/audio-lens/internal/go/db"
+	"github.com/tilmanzzz/audio-lens/internal/go/queue"
 )
 
 func main() {

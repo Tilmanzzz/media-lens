@@ -6,7 +6,6 @@ require (
 	github.com/georgysavva/scany/v2 v2.1.4
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/jjgmckenzie/podcastindex v0.1.4
-	github.com/joho/godotenv v1.5.1
 	github.com/minio/minio-go/v7 v7.1.0
 	github.com/mmcdole/gofeed v1.3.0
 	github.com/redis/go-redis/v9 v9.19.0

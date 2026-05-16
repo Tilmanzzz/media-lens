@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/tilmanzzz/audio-lens/internal/db"
+	"github.com/tilmanzzz/audio-lens/internal/go/db"
 )
 
 func main() {
