@@ -1,10 +1,10 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 
 -- Technical batch control for stage-independent execution.
-CREATE TYPE batch_status AS ENUM ('pending', 'running', 'done', 'failed', 'cancelled');
-CREATE TYPE pipeline_stage AS ENUM ('ingestion', 'silver', 'silver_enriched');
+CREATE TYPE batch_status AS ENUM ('pending', 'success', 'failed');
+CREATE TYPE pipeline_stage AS ENUM ('ingestion', 'transcription', 'segmenting', 'processing');
 CREATE TYPE load_mode AS ENUM ('full', 'incremental');
-CREATE TYPE emotion_label AS ENUM ('positive', 'neutral', 'negative');
+CREATE TYPE emotion_label AS ENUM ('happy', 'neutral', 'angry', 'sad');
 CREATE TYPE fact_verdict AS ENUM ('TRUE', 'MOSTLY_TRUE', 'MISLEADING', 'FALSE', 'UNVERIFIABLE');
 
 -- One row per stage run. A stage can be started independently and can either
@@ -33,6 +33,7 @@ CREATE TABLE podcasts (
   title               TEXT        NOT NULL,
   description         TEXT,
   episode_count       INTEGER,
+  categories          TEXT[],
   image_url           TEXT,
   ingested_at         TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   published_at        TIMESTAMPTZ,
@@ -99,7 +100,7 @@ CREATE INDEX idx_segments_episode_id ON segments(episode_id);
 CREATE INDEX idx_segments_title ON segments(title);
 CREATE INDEX idx_segments_system_updated_at ON segments(system_updated_at);
 
-
+-- punkt segmentiert
 CREATE TABLE transcript_lines (
   id              UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   segment_id      UUID          NOT NULL REFERENCES segments(id) ON DELETE CASCADE,
@@ -138,18 +139,21 @@ CREATE TABLE fact_checked_claims (
 CREATE INDEX idx_fact_checked_claims_segment_id ON fact_checked_claims(segment_id);
 CREATE INDEX idx_fact_checked_claims_system_updated_at ON fact_checked_claims(system_updated_at);
 
-CREATE TABLE segment_embeddings (
-  id              UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-  segment_id      UUID          NOT NULL REFERENCES segments(id) ON DELETE CASCADE,
+CREATE TYPE embedding_level AS ENUM ('segment', 'episode', 'podcast');
+
+CREATE TABLE embeddings (
+  id              UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+  segment_id      UUID            REFERENCES segments(id) ON DELETE CASCADE,
+  episode_id      UUID            REFERENCES episodes(id) ON DELETE CASCADE,
+  podcast_id      UUID            REFERENCES podcasts(id) ON DELETE CASCADE,
+  level           embedding_level NOT NULL DEFAULT 'podcast', 
   embedding       vector(384),
-  batch_id        UUID          REFERENCES pipeline_batches(id) ON DELETE SET NULL,
-  system_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT uq_segment_embeddings_segment UNIQUE (segment_id)
+  batch_id        UUID            REFERENCES pipeline_batches(id) ON DELETE SET NULL,
+  system_updated_at TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
 );
 
-CREATE INDEX idx_segment_embeddings_segment_id ON segment_embeddings(segment_id);
-CREATE INDEX idx_segment_embeddings_vector ON segment_embeddings USING hnsw (embedding vector_cosine_ops);
-CREATE INDEX idx_segment_embeddings_system_updated_at ON segment_embeddings(system_updated_at);
+CREATE INDEX idx_embeddings_vector ON embeddings USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX idx_embeddings_system_updated_at ON embeddings(system_updated_at);
 
 -- Fact-checked claims are stored in fact_checked_claims.
 
@@ -194,6 +198,6 @@ CREATE TRIGGER set_timestamp_fact_checked_claims
   BEFORE UPDATE ON fact_checked_claims
   FOR EACH ROW EXECUTE FUNCTION trigger_set_system_timestamp();
 
-CREATE TRIGGER set_timestamp_segment_embeddings
-  BEFORE UPDATE ON segment_embeddings
+CREATE TRIGGER set_timestamp_embeddings
+  BEFORE UPDATE ON embeddings
   FOR EACH ROW EXECUTE FUNCTION trigger_set_system_timestamp();
