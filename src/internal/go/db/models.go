@@ -3,11 +3,13 @@ package db
 import "time"
 
 type Podcast struct {
-	ID               string  `db:"id"`
-	FeedURL          string  `db:"feed_url"`
-	FeedEtag         *string `db:"feed_etag"`
-	FeedLastModified *string `db:"feed_last_modified"`
-	MaxEpisodes      *int    `db:"max_episodes"`
+	ID          string     `db:"id"`
+	GUID        string     `db:"guid"`
+	FeedURL     string     `db:"feed_url"`
+	Title       string     `db:"title"`
+	IngestedAt  time.Time  `db:"ingested_at"`
+	UpdatedAt   *time.Time `db:"updated_at"`
+	MaxEpisodes *int       `db:"max_episodes"`
 }
 
 type Episode struct {
@@ -16,7 +18,7 @@ type Episode struct {
 	GUID         string     `db:"guid"`
 	Title        string     `db:"title"`
 	AudioKey     string     `db:"audio_key"`
-	Status       string     `db:"status"`
-	PublishedAt  *time.Time // Added to track changes
-	EnclosureURL string     // Added to track file changes
+	PublishedAt  *time.Time `db:"published_at"`
+	EnclosureURL string     `db:"enclosure_url"`
+	BatchID      string     `db:"batch_id"`
 }

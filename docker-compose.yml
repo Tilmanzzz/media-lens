@@ -78,6 +78,7 @@ services:
       - MINIO_PASS=${MINIO_PASS}
       - POSTGRES_URL=${POSTGRES_URL}
       - REDIS_ADDR=${REDIS_ADDR}
+      - LOAD_MODE=${LOAD_MODE}
 
   insertion:
     build:
