@@ -156,6 +156,8 @@ func main() {
 					// Logged but not failed. A scheduled job can sweep the DB for
 					// "pending_transcription" records not present in the stream.
 					log.Printf("Warning: Failed to enqueue %s: %v", item.GUID, err)
+				} else {
+					fmt.Printf("Successfully ingested and enqueued episode: %s\n", item.Title)
 				}
 
 				return nil
