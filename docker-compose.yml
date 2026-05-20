@@ -29,133 +29,133 @@ services:
     depends_on:
       - postgres
 
-  # minio:
-  #   image: minio/minio
-  #   ports:
-  #     - "9000:9000"
-  #     - "9001:9001"
-  #   environment:
-  #     MINIO_ROOT_USER: ${MINIO_USER}
-  #     MINIO_ROOT_PASSWORD: ${MINIO_PASS}
-  #   command: server /data --console-address ":9001"
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-  #     interval: 5s
-  #     timeout: 5s
-  #     retries: 1
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASS}
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 1
 
-  # redis:
-  #   image: redis:7-alpine
-  #   ports:
-  #     - "6379:6379"
-  #   command: redis-server --appendonly yes
-  #   healthcheck:
-  #     test: ["CMD", "redis-cli", "ping"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
-  #     start_period: 10s
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
-  # ingestion:
-  #   build:
-  #     context: ./src
-  #     dockerfile: ./01_ingestion/Dockerfile
-  #     target: ingestion
-  #   depends_on:
-  #     minio:
-  #       condition: service_healthy
-  #     postgres:
-  #       condition: service_healthy
-  #   env_file:
-  #     - .env
-  #   environment:
-  #     - MINIO_ENDPOINT=${MINIO_ENDPOINT}
-  #     - MINIO_USER=${MINIO_USER}
-  #     - MINIO_PASS=${MINIO_PASS}
-  #     - POSTGRES_URL=${POSTGRES_URL}
-  #     - REDIS_ADDR=${REDIS_ADDR}
+  ingestion:
+    build:
+      context: ./src
+      dockerfile: ./01_ingestion/Dockerfile
+      target: ingestion
+    depends_on:
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - POSTGRES_URL=${POSTGRES_URL}
+      - REDIS_ADDR=${REDIS_ADDR}
 
-  # insertion:
-  #   build:
-  #     context: ./src/
-  #     dockerfile: ./01_ingestion/Dockerfile
-  #     target: insertion
-  #   depends_on:
-  #     minio:
-  #       condition: service_healthy
-  #   env_file:
-  #     - .env
-  #   profiles: ["tools"]
-  #   environment:
-  #     - MINIO_ENDPOINT=${MINIO_ENDPOINT}
-  #     - MINIO_USER=${MINIO_USER}
-  #     - MINIO_PASS=${MINIO_PASS}
-  #     - POSTGRES_URL=${POSTGRES_URL}
-  #     - REDIS_ADDR=${REDIS_ADDR}
-  # transcription:
-  #   build:
-  #     context: ./src/
-  #     dockerfile: ./02_processing/transcription/Dockerfile
-  #   depends_on:
-  #     minio:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #     postgres:
-  #       condition: service_healthy
-  #   environment:
-  #     - MINIO_ENDPOINT=${MINIO_ENDPOINT}
-  #     - MINIO_USER=${MINIO_USER}
-  #     - MINIO_PASS=${MINIO_PASS}
-  #     - POSTGRES_URL=${POSTGRES_URL}
-  #     - REDIS_ADDR=${REDIS_ADDR}
-  # processing_silver:
-  #   build: ./src/02_processing/silver/
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     minio:
-  #       condition: service_healthy
-  #   env_file:
-  #     - .env
-  #   environment:
-  #     - MINIO_USER=${MINIO_USER}
-  #     - MINIO_PASS=${MINIO_PASS}
-  #     - S3_ENDPOINT=http://minio:9000
-  #     - POSTGRES_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASS}@postgres:5432/${POSTGRES_DB}
+  insertion:
+    build:
+      context: ./src/
+      dockerfile: ./01_ingestion/Dockerfile
+      target: insertion
+    depends_on:
+      minio:
+        condition: service_healthy
+    env_file:
+      - .env
+    profiles: ["tools"]
+    environment:
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - POSTGRES_URL=${POSTGRES_URL}
+      - REDIS_ADDR=${REDIS_ADDR}
+  transcription:
+    build:
+      context: ./src/
+      dockerfile: ./02_processing/transcription/Dockerfile
+    depends_on:
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - POSTGRES_URL=${POSTGRES_URL}
+      - REDIS_ADDR=${REDIS_ADDR}
+  processing_silver:
+    build: ./src/02_processing/silver/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - S3_ENDPOINT=http://minio:9000
+      - POSTGRES_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASS}@postgres:5432/${POSTGRES_DB}
 
-  # ollama:
-  #   image: ollama/ollama:latest
-  #   ports:
-  #     - "11434:11434"
-  #   volumes:
-  #     - ollama_data:/root/.ollama
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
 
-  # backend:
-  #   build: ./src/backend
-  #   ports:
-  #     - "8080:8080"
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     minio:
-  #       condition: service_healthy
-  #     ollama:
-  #       condition: service_started
-  #   env_file:
-  #     - .env
-  #   environment:
-  #     - POSTGRES_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASS}@postgres:5432/${POSTGRES_DB}?sslmode=disable
-  #     - MINIO_ENDPOINT=${MINIO_ENDPOINT}
-  #     - MINIO_USER=${MINIO_USER}
-  #     - MINIO_PASS=${MINIO_PASS}
-  #     - BACKEND_PORT=:8080
-  #     - CORS_ORIGINS=http://localhost:3000
-  #     - OLLAMA_URL=http://ollama:11434
-  #     - EMBEDDING_MODEL=qwen3-embedding:4b
+  backend:
+    build: ./src/backend
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASS}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - BACKEND_PORT=:8080
+      - CORS_ORIGINS=http://localhost:3000
+      - OLLAMA_URL=http://ollama:11434
+      - EMBEDDING_MODEL=qwen3-embedding:4b
 
 volumes:
   postgres_data:
-  # minio_data:
+  minio_data:
   pgadmin_data:
-  # ollama_data:
+  ollama_data:
