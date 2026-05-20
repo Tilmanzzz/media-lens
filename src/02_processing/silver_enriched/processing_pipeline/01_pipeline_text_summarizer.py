@@ -14,7 +14,7 @@ from silver_enriched.text_summarizer.text_summarizer_config import TextSummarize
 from silver_enriched.text_summarizer.text_summarizer_core import TextSummarizer
 
 from common.db_connector import DbConnector
-from silver_enriched.processing.pipeline_utils import (
+from silver_enriched.processing_pipeline.pipeline_utils import (
     LoadContext,
     expand_targets_from_chunks,
     fetch_chapter_ids_for_episode,
@@ -41,8 +41,6 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Test run: upper bound watermark (ISO timestamp)",
     )
-
-    parser.add_argument("--config", default="text_summarizer_config.json", help="Optional text_summarizer_config.json path")
     return parser.parse_args()
 
 def update_episode_summaries(
@@ -160,9 +158,8 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
         episode_ids, chapter_ids = expand_targets_from_chunks(delta_chunks)
         chunks = fetch_chunks(conn, episode_ids, chapter_ids, update_ts_level="chapter")
 
-    config_path = getattr(args, "text_summarizer_config", None) or getattr(args, "config", None)
-    config = TextSummarizerConfig.from_file(config_path) if config_path else TextSummarizerConfig()
-    summarizer = TextSummarizer(config=config)
+    summarizer = TextSummarizer()
+    print(summarizer.config)
 
     episode_summaries = summarizer.summarize_all_episodes(chunks)
     chapter_summaries = summarizer.summarize_all_chapters(chunks)

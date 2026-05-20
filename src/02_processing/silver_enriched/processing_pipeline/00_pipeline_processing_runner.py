@@ -12,7 +12,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.append(str(SRC_DIR))
 
 from common.db_connector import DbConnector
-from silver_enriched.processing.pipeline_utils import (
+from silver_enriched.processing_pipeline.pipeline_utils import (
     LoadContext,
     finalize_pipeline_batch,
     start_pipeline_batch,

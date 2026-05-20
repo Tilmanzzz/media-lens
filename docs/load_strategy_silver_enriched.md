@@ -116,7 +116,7 @@ Wenn `--test-end-watermark` gesetzt ist, hat das Testfenster Vorrang.
 ### Full-Load
 
 ```bash
-python src/02_processing/silver_enriched/processing/00_pipeline_processing_runner.py \
+python src/02_processing/silver_enriched/processing_pipeline/00_pipeline_processing_runner.py \
   --mode full \
   --steps text_summarizer
 ```
@@ -124,7 +124,7 @@ python src/02_processing/silver_enriched/processing/00_pipeline_processing_runne
 ### Delta-Load
 
 ```bash
-python src/02_processing/silver_enriched/processing/00_pipeline_processing_runner.py \
+python src/02_processing/silver_enriched/processing_pipeline/00_pipeline_processing_runner.py \
   --mode delta \
   --steps text_summarizer
 ```
@@ -132,7 +132,7 @@ python src/02_processing/silver_enriched/processing/00_pipeline_processing_runne
 ### Delta-Testfenster
 
 ```bash
-python src/02_processing/silver_enriched/processing/00_pipeline_processing_runner.py \
+python src/02_processing/silver_enriched/processing_pipeline/00_pipeline_processing_runner.py \
   --mode delta \
   --steps text_summarizer \
   --testing \
@@ -143,7 +143,7 @@ python src/02_processing/silver_enriched/processing/00_pipeline_processing_runne
 ### Episode-Test
 
 ```bash
-python src/02_processing/silver_enriched/processing/00_pipeline_processing_runner.py \
+python src/02_processing/silver_enriched/processing_pipeline/00_pipeline_processing_runner.py \
   --mode full \
   --steps text_summarizer \
   --testing \
