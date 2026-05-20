@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 import importlib.util
 from pathlib import Path
 import sys
@@ -68,11 +68,12 @@ def main() -> None:
     print("steps to execute:", steps)
     
     connector = DbConnector()
-    with connector.get_connection() as conn:   
+    with connector.get_connection() as conn:
         stage = args.stage or "processing"
         load_mode = "full" if args.mode == "full" else "delta"
         batch_id = args.batch_id or start_pipeline_batch(conn, stage, load_mode)
         args.batch_id = batch_id
+        processing_update_ts = datetime.now(timezone.utc)
 
         try:
             watermark = connector.parse_ts(args.watermark)
@@ -83,9 +84,10 @@ def main() -> None:
                 mode=args.mode,
                 watermark=watermark,
                 connector=connector,
+                processing_update_ts=processing_update_ts,
             )
-            print("watermark for stage '{}': {}".format(stage, watermark))
-            print("Context ctx:", ctx)
+            print("start watermark {} - end watermark: {} -  stage '{}': {}".format(watermark, args.test_end_watermark, stage, processing_update_ts))
+            print("processing context (ctx):", ctx)
 
             base_dir = Path(__file__).resolve().parent
             step_map = {
@@ -103,8 +105,9 @@ def main() -> None:
                 module = load_step_module(step_path)
                 if not hasattr(module, "run_step"):
                     raise RuntimeError(f"Step module missing run_step: {step_path}")
-                print(f"> Running step: {step}")
+                print(f"------ Starting step: {step} ------")
                 module.run_step(conn, ctx, args)
+                print(f"------ Completed step: {step} ------")
 
             finalize_pipeline_batch(conn, batch_id, "success")
         except (KeyboardInterrupt, Exception):

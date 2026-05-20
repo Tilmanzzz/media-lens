@@ -12,45 +12,81 @@ class LoadContext:
     mode: str
     connector: DbConnector
     watermark: Optional[datetime]
+    processing_update_ts: Optional[datetime] = None
 
 
-def should_include(source_ts: Optional[datetime], ctx: LoadContext) -> bool:
+def should_include(processing_update_ts: Optional[datetime], ctx: LoadContext) -> bool:
     if ctx.mode == "full":
+        print("  mode is full => include all")
         return True
     if ctx.watermark is None:
+        print("  watermark is None => include all")
         return True
-    return source_ts > ctx.watermark
+    if processing_update_ts is None:
+        print("  processing_update_ts is None => include")
+        return True
+    return processing_update_ts > ctx.watermark
 
 
 def should_include_between(
-    source_ts: Optional[datetime],
+    processing_update_ts: Optional[datetime],
     start_ts: Optional[datetime],
     end_ts: Optional[datetime],
 ) -> bool:
-    if source_ts is None:
+    if processing_update_ts is None:
+        return True
+    if start_ts is not None and processing_update_ts <= start_ts:
         return False
-    if start_ts is not None and source_ts <= start_ts:
-        return False
-    if end_ts is not None and source_ts > end_ts:
+    if end_ts is not None and processing_update_ts > end_ts:
         return False
     return True
 
 
-def fetch_delta_targets(conn, ctx: LoadContext) -> Tuple[Set[str], Set[str]]:
+def fetch_delta_targets(conn, ctx: LoadContext, update_ts_level: str = "chapter") -> Tuple[Set[str], Set[str]]:
     if ctx.mode == "full":
         return set(), set()
 
-    clause = ""
-    params: List[Any] = []
-    if ctx.watermark is not None:
-        clause = "WHERE COALESCE(ch.system_updated_at, e.system_updated_at, e.updated_at) > %s"
-        params.append(ctx.watermark)
+    if update_ts_level not in {"chapter", "episode", "podcast"}:
+        raise ValueError(f"Unknown update_ts_level: {update_ts_level}")
 
-    sql = f"""
+    params: List[Any] = []
+
+    if ctx.watermark is not None:
+        # choose the processing_updated_at expression according to requested level
+        if update_ts_level == "chapter":
+            expr = "COALESCE(ch.processing_updated_at, ch.preprocessing_updated_at, e.source_system_updated_at, TIMESTAMPTZ '1970-01-01')"
+            sql = f"""
         SELECT DISTINCT e.id AS episode_id, ch.id AS chapter_id
         FROM episodes e
         JOIN chapter ch ON ch.episode_id = e.id
-        {clause}
+        WHERE {expr} > %s OR ch.processing_updated_at IS NULL
+    """
+            params.append(ctx.watermark)
+        elif update_ts_level == "episode":
+            expr = "COALESCE(e.processing_updated_at, e.source_system_updated_at, TIMESTAMPTZ '1970-01-01')"
+            sql = f"""
+        SELECT DISTINCT e.id AS episode_id, ch.id AS chapter_id
+        FROM episodes e
+        JOIN chapter ch ON ch.episode_id = e.id
+        WHERE {expr} > %s OR ch.processing_updated_at IS NULL
+    """
+            params.append(ctx.watermark)
+        else:  # podcast
+            expr = "COALESCE(p.processing_updated_at, p.source_system_updated_at, TIMESTAMPTZ '1970-01-01')"
+            sql = f"""
+        SELECT DISTINCT e.id AS episode_id, ch.id AS chapter_id
+        FROM podcasts p
+        JOIN episodes e ON e.podcast_id = p.id
+        JOIN chapter ch ON ch.episode_id = e.id
+        WHERE {expr} > %s OR ch.processing_updated_at IS NULL
+    """
+            params.append(ctx.watermark)
+    else:
+        # no watermark => select all
+        sql = f"""
+        SELECT DISTINCT e.id AS episode_id, ch.id AS chapter_id
+        FROM episodes e
+        JOIN chapter ch ON ch.episode_id = e.id
     """
 
     episode_ids: Set[str] = set()
@@ -69,6 +105,7 @@ def fetch_chunks(
     conn,
     episode_ids: Optional[Set[str]] = None,
     chapter_ids: Optional[Set[str]] = None,
+    update_ts_level: str = "chapter",
 ) -> List[Dict[str, Any]]:
     where_parts: List[str] = []
     params: List[Any] = []
@@ -84,6 +121,16 @@ def fetch_chunks(
     if where_parts:
         where_clause = "WHERE " + " OR ".join(where_parts)
 
+    if update_ts_level not in {"chapter", "episode", "podcast"}:
+        raise ValueError(f"Unknown update_ts_level: {update_ts_level}")
+
+    # use processing_updated_at for watermark/delta semantics, with epoch fallback for NULLs
+    processing_update_ts_expr = {
+        "chapter": "ch.processing_updated_at",
+        "episode": "e.processing_updated_at",
+        "podcast": "p.processing_updated_at",
+    }[update_ts_level]
+
     sql = f"""
         SELECT
             p.id AS podcast_id,
@@ -91,8 +138,9 @@ def fetch_chunks(
             e.id AS episode_id,
             e.title AS episode_title,
             ch.id AS chapter_id,
+            ch.title AS chapter_title,
             ch.transcript AS transcript_text,
-            COALESCE(ch.system_updated_at, e.system_updated_at, e.updated_at) AS source_update_ts
+            {processing_update_ts_expr} AS source_update_ts
         FROM podcasts p
         JOIN episodes e ON e.podcast_id = p.id
         JOIN chapter ch ON ch.episode_id = e.id
@@ -112,8 +160,9 @@ def fetch_chunks(
                     "episode_id": row[2],
                     "episode_title": row[3] or "",
                     "chapter_id": row[4],
-                    "transcript_text": row[5] or "",
-                    "source_update_ts": row[6],
+                    "chapter_title": row[5] or "",
+                    "transcript_text": row[6] or "",
+                    "source_update_ts": row[7],
                 }
             )
     return chunks
@@ -153,8 +202,8 @@ def start_pipeline_batch(conn, stage: str, load_mode: str) -> str:
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO pipeline_batches (stage, load_mode, status, start_ts, fin_ts, updated_at)
-            VALUES (%s, %s, 'pending', NOW(), NOW(), NOW())
+            INSERT INTO pipeline_batches (stage, load_mode, status, start_ts, fin_ts)
+            VALUES (%s, %s, 'pending', NOW(), NOW())
             RETURNING id
             """,
             (stage, load_mode),
@@ -167,7 +216,7 @@ def start_pipeline_batch(conn, stage: str, load_mode: str) -> str:
 def finalize_pipeline_batch(conn, batch_id: str, status: str) -> None:
     with conn.cursor() as cur:
         cur.execute(
-            "UPDATE pipeline_batches SET status = %s, fin_ts = NOW(), updated_at = NOW() WHERE id = %s",
+            "UPDATE pipeline_batches SET status = %s, fin_ts = NOW() WHERE id = %s",
             (status, batch_id),
         )
     conn.commit()

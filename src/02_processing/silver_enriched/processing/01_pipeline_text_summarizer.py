@@ -49,10 +49,14 @@ def update_episode_summaries(
     conn,
     summaries: Iterable[Dict[str, Any]],
     batch_id: Optional[str],
+    processing_update_ts: Optional[datetime],
 ) -> int:
 
+    if processing_update_ts is None:
+        raise ValueError("processing_update_ts is required for processing writes")
+
     sql = (
-        "UPDATE episodes SET summary = %s, system_updated_at = NOW(), batch_id = %s "
+        "UPDATE episodes SET summary = %s, processing_updated_at = %s, batch_id = %s "
         "WHERE id = %s"
     )
 
@@ -66,7 +70,7 @@ def update_episode_summaries(
             if not episode_id or text is None:
                 continue
 
-            cur.execute(sql, (text, batch_id, episode_id))
+            cur.execute(sql, (text, processing_update_ts, batch_id, episode_id))
             updated += cur.rowcount
 
     return updated
@@ -76,13 +80,16 @@ def update_chapter_summaries(
     conn,
     summaries: Iterable[Dict[str, Any]],
     batch_id: Optional[str],
+    processing_update_ts: Optional[datetime],
 ) -> int:
 
+    if processing_update_ts is None:
+        raise ValueError("processing_update_ts is required for processing writes")
+
     sql = (
-        "UPDATE chapter SET summary = %s, system_updated_at = NOW(), batch_id = %s "
+        "UPDATE chapter SET summary = %s, processing_updated_at = %s, batch_id = %s "
         "WHERE id = %s"
     )
-
     updated = 0
 
     with conn.cursor() as cur:
@@ -93,7 +100,7 @@ def update_chapter_summaries(
             if not chapter_id or text is None:
                 continue
 
-            cur.execute(sql, (text, batch_id, chapter_id))
+            cur.execute(sql, (text, processing_update_ts, batch_id, chapter_id))
             updated += cur.rowcount
 
     return updated
@@ -119,12 +126,13 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
             return
 
     if ctx.mode == "delta" and not (args.testing and args.test_episode_id):
-        episode_ids, chapter_ids = fetch_delta_targets(conn, ctx)
+        # use chapter-level processing_updated_at when checking watermark
+        episode_ids, chapter_ids = fetch_delta_targets(conn, ctx, update_ts_level="chapter")
         if not episode_ids and not chapter_ids:
             print("text_summarizer: No delta changes detected.")
             return
 
-    chunks = fetch_chunks(conn, episode_ids, chapter_ids)
+    chunks = fetch_chunks(conn, episode_ids, chapter_ids, update_ts_level="chapter")
     if not chunks:
         print("text_summarizer: No chunks found.")
         return
@@ -134,7 +142,9 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
         if args.testing and args.test_end_watermark:
             end_ts = ctx.connector.parse_ts(args.test_end_watermark)
         delta_chunks: List[Dict[str, Any]] = []
+        print("chunks count: ", len(chunks))
         for chunk in chunks:
+            print(f"chunk: {chunk.get('chapter_id')} source_update_ts: {chunk.get('source_update_ts').isoformat() if chunk.get('source_update_ts') else 'None'}")
             ts = ctx.connector.parse_ts(chunk.get("source_update_ts"))
             if args.testing and end_ts is not None:
                 include = should_include_between(ts, ctx.watermark, end_ts)
@@ -148,7 +158,7 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
             return
 
         episode_ids, chapter_ids = expand_targets_from_chunks(delta_chunks)
-        chunks = fetch_chunks(conn, episode_ids, chapter_ids)
+        chunks = fetch_chunks(conn, episode_ids, chapter_ids, update_ts_level="chapter")
 
     config_path = getattr(args, "text_summarizer_config", None) or getattr(args, "config", None)
     config = TextSummarizerConfig.from_file(config_path) if config_path else TextSummarizerConfig()
@@ -158,9 +168,18 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
     chapter_summaries = summarizer.summarize_all_chapters(chunks)
 
     total_updates = 0
-    total_updates += update_episode_summaries(conn, episode_summaries, args.batch_id)
-    total_updates += update_chapter_summaries(conn, chapter_summaries, args.batch_id)
-
+    total_updates += update_episode_summaries(
+        conn,
+        episode_summaries,
+        args.batch_id,
+        ctx.processing_update_ts,
+    )
+    total_updates += update_chapter_summaries(
+        conn,
+        chapter_summaries,
+        args.batch_id,
+        ctx.processing_update_ts,
+    )
     conn.commit()
     print(f"text_summarizer: Done. Rows updated: {total_updates}")
 
