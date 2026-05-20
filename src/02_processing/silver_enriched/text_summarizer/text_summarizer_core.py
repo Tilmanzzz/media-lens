@@ -13,7 +13,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.append(str(SRC_DIR))
 
 from common.app_logger import AppLogger
-from text_summarizer_config import TextSummarizerConfig
+from .text_summarizer_config import TextSummarizerConfig
 
 
 class TextSummarizer:
@@ -42,17 +42,25 @@ You are summarizing a complete podcast episode.
 
 {text}
 
-Return ONLY the summary, no explanations or commentary.
+Return ONLY the summary, no explanations, introduction or commentary.
 
 Create:
 1. An overall summary (2-3 sentences)
 2. Key takeaways of the highlights (bullet list)
+
+Output String:
+    Overall Summary:
+    <summary here>
+    Key Takeaways:
+    - <takeaway 1>
+    - <takeaway 2>
+    - ...
 """.strip()
         )
 
-        self.segment_prompt = PromptTemplate.from_template(
+        self.chapter_prompt = PromptTemplate.from_template(
             """
-Summarize the following podcast segment in 1-3 sentences maximum.
+Summarize the following podcast chapter in 1-3 sentences maximum.
 Be concise and capture only the core message.
 
 {text}
@@ -62,7 +70,7 @@ Return ONLY the summary, no explanations or commentary.
         )
 
         self.episode_chain = self.episode_prompt | self.llm
-        self.segment_chain = self.segment_prompt | self.llm
+        self.chapter_chain = self.chapter_prompt | self.llm
 
         self.logger.debug("Initialized TextSummarizer with model=%s", self.config.model)
 
@@ -91,20 +99,20 @@ Return ONLY the summary, no explanations or commentary.
         return grouped
 
     @staticmethod
-    def group_by_segment(chunks: List[Dict[str, Any]]) -> Dict[Tuple[Any, Any, Any], List[Dict[str, Any]]]:
+    def group_by_chapter(chunks: List[Dict[str, Any]]) -> Dict[Tuple[Any, Any, Any], List[Dict[str, Any]]]:
         grouped: Dict[Tuple[Any, Any, Any], List[Dict[str, Any]]] = defaultdict(list)
         for chunk in chunks:
-            key = (chunk["podcast_id"], chunk["episode_id"], chunk["segment_id"])
+            key = (chunk["podcast_id"], chunk["episode_id"], chunk["chapter_id"])
             grouped[key].append(chunk)
         return grouped
 
     @staticmethod
     def _sort_episode_chunks(episode_chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        return sorted(episode_chunks, key=lambda x: (x.get("segment_id", 0), x.get("chunk_id", 0)))
+        return sorted(episode_chunks, key=lambda x: (x.get("chapter_id", 0), x.get("chunk_id", 0)))
 
     @staticmethod
-    def _sort_segment_chunks(segment_chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        return sorted(segment_chunks, key=lambda x: x.get("chunk_id", 0))
+    def _sort_chapter_chunks(chapter_chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return sorted(chapter_chunks, key=lambda x: x.get("chunk_id", 0))
 
     @staticmethod
     def _extract_content(response: Any) -> str:
@@ -124,15 +132,15 @@ Return ONLY the summary, no explanations or commentary.
         result = self.episode_chain.invoke({"text": full_transcript})
         return self._extract_content(result)
 
-    def summarize_segment_chunks(self, segment_chunks: List[Dict[str, Any]]) -> str:
-        ordered = self._sort_segment_chunks(segment_chunks)
+    def summarize_chapter_chunks(self, chapter_chunks: List[Dict[str, Any]]) -> str:
+        ordered = self._sort_chapter_chunks(chapter_chunks)
         full_transcript = "\n\n".join(c.get("transcript_text", "") for c in ordered if c.get("transcript_text"))
 
         if not full_transcript.strip():
             return ""
 
-        self.logger.debug("Summarizing segment with %d chunks", len(ordered))
-        result = self.segment_chain.invoke({"text": full_transcript})
+        self.logger.debug("Summarizing chapter with %d chunks", len(ordered))
+        result = self.chapter_chain.invoke({"text": full_transcript})
         return self._extract_content(result)
 
     def summarize_all_episodes(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -159,22 +167,22 @@ Return ONLY the summary, no explanations or commentary.
 
         return results
 
-    def summarize_all_segments(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        grouped = self.group_by_segment(chunks)
+    def summarize_all_chapters(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        grouped = self.group_by_chapter(chunks)
         results: List[Dict[str, Any]] = []
 
-        for (podcast_id, episode_id, segment_id), segment_chunks in grouped.items():
-            ordered = self._sort_segment_chunks(segment_chunks)
-            summary = self.summarize_segment_chunks(ordered)
+        for (podcast_id, episode_id, chapter_id), chapter_chunks in grouped.items():
+            ordered = self._sort_chapter_chunks(chapter_chunks)
+            summary = self.summarize_chapter_chunks(ordered)
 
             if not ordered:
                 continue
 
             self.logger.info(
-                "Segment summary created: podcast=%s episode=%s segment=%s",
+                "chapter summary created: podcast=%s episode=%s chapter=%s",
                 podcast_id,
                 episode_id,
-                segment_id,
+                chapter_id,
             )
             results.append(
                 {
@@ -182,7 +190,7 @@ Return ONLY the summary, no explanations or commentary.
                     "podcast_title": ordered[0].get("podcast_title", ""),
                     "episode_id": episode_id,
                     "episode_title": ordered[0].get("episode_title", ""),
-                    "segment_id": segment_id,
+                    "chapter_id": chapter_id,
                     "summary": summary,
                 }
             )

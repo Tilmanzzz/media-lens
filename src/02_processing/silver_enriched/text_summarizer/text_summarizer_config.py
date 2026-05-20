@@ -22,7 +22,6 @@ class TextSummarizerConfig:
     @classmethod
     def from_file(cls, config_path: str | Path) -> "TextSummarizerConfig":
         raw_path = Path(config_path).expanduser()
-
         if raw_path.is_absolute():
             candidate_paths = [raw_path]
         else:

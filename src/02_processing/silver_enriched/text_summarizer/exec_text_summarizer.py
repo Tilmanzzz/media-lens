@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-from text_summarizer_config import TextSummarizerConfig
-from text_summarizer_core import TextSummarizer
+from .text_summarizer_config import TextSummarizerConfig
+from .text_summarizer_core import TextSummarizer
 
 
 def load_chunks(input_path: str | Path) -> List[Dict[str, Any]]:
@@ -30,7 +30,7 @@ def load_chunks(input_path: str | Path) -> List[Dict[str, Any]]:
     raise ValueError("Input JSON must be a list of chunks or an object with a 'chunks' list.")
 
 
-def apply_filters(chunks: List[Dict[str, Any]], podcast_id: Any, episode_id: Any, segment_id: Any) -> List[Dict[str, Any]]:
+def apply_filters(chunks: List[Dict[str, Any]], podcast_id: Any, episode_id: Any, chapter_id: Any) -> List[Dict[str, Any]]:
     filtered = chunks
 
     if podcast_id is not None:
@@ -39,8 +39,8 @@ def apply_filters(chunks: List[Dict[str, Any]], podcast_id: Any, episode_id: Any
     if episode_id is not None:
         filtered = [c for c in filtered if c.get("episode_id") == episode_id]
 
-    if segment_id is not None:
-        filtered = [c for c in filtered if c.get("segment_id") == segment_id]
+    if chapter_id is not None:
+        filtered = [c for c in filtered if c.get("chapter_id") == chapter_id]
 
     return filtered
 
@@ -55,27 +55,27 @@ def print_episode_summaries(episode_summaries: List[Dict[str, Any]]) -> None:
         print(summary["summary"])
 
 
-def print_segment_summaries(segment_summaries: List[Dict[str, Any]]) -> None:
-    for summary in segment_summaries:
-        print("\n--- SEGMENT ---")
+def print_chapter_summaries(chapter_summaries: List[Dict[str, Any]]) -> None:
+    for summary in chapter_summaries:
+        print("\n--- chapter ---")
         print(
             f"Podcast {summary['podcast_id']} ({summary['podcast_title']}) | "
             f"Episode {summary['episode_id']} ({summary['episode_title']}) | "
-            f"Segment {summary['segment_id']}"
+            f"chapter {summary['chapter_id']}"
         )
         print(summary["summary"])
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Summarize podcast episodes and segments from transcript chunks.")
+    parser = argparse.ArgumentParser(description="Summarize podcast episodes and chapters from transcript chunks.")
 
     parser.add_argument("--config", default="text_summarizer_config.json", help="Path to config JSON")
     parser.add_argument("--input", default=None, help="Path to chunks input JSON")
-    parser.add_argument("--mode", choices=["episode", "segment", "both"], default=None)
+    parser.add_argument("--mode", choices=["episode", "chapter", "both"], default=None)
 
     parser.add_argument("--podcast-id", type=int, default=None)
     parser.add_argument("--episode-id", type=int, default=None)
-    parser.add_argument("--segment-id", type=int, default=None)
+    parser.add_argument("--chapter-id", type=int, default=None)
 
     parser.add_argument("--output", default=None, help="Output JSON file path")
 
@@ -94,7 +94,7 @@ def main() -> None:
     output_path = args.output or config.default_output_path
 
     chunks = load_chunks(input_path)
-    filtered_chunks = apply_filters(chunks, args.podcast_id, args.episode_id, args.segment_id)
+    filtered_chunks = apply_filters(chunks, args.podcast_id, args.episode_id, args.chapter_id)
 
     if not filtered_chunks:
         summarizer.logger.warning("No chunks matched the selected filters")
@@ -108,10 +108,10 @@ def main() -> None:
         output["episodes"] = episode_summaries
         print_episode_summaries(episode_summaries)
 
-    if mode in {"segment", "both"}:
-        segment_summaries = summarizer.summarize_all_segments(filtered_chunks)
-        output["segments"] = segment_summaries
-        print_segment_summaries(segment_summaries)
+    if mode in {"chapter", "both"}:
+        chapter_summaries = summarizer.summarize_all_chapters(filtered_chunks)
+        output["chapters"] = chapter_summaries
+        print_chapter_summaries(chapter_summaries)
 
     out_path = Path(output_path).expanduser()
     if not out_path.is_absolute():

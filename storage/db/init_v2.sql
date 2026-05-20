@@ -1,9 +1,12 @@
+-- DROP SCHEMA public CASCADE;
+-- CREATE SCHEMA public;
+
 CREATE EXTENSION IF NOT EXISTS vector;
 
 -- Technical batch control for stage-independent execution.
 CREATE TYPE batch_status AS ENUM ('pending', 'success', 'failed');
 CREATE TYPE pipeline_stage AS ENUM ('ingestion', 'transcription', 'segmenting', 'processing');
-CREATE TYPE load_mode AS ENUM ('full', 'incremental');
+CREATE TYPE load_mode AS ENUM ('full', 'delta');
 CREATE TYPE emotion_label AS ENUM ('happy', 'neutral', 'angry', 'sad');
 CREATE TYPE fact_verdict AS ENUM ('TRUE', 'MOSTLY_TRUE', 'MISLEADING', 'FALSE', 'UNVERIFIABLE');
 
@@ -77,54 +80,54 @@ CREATE UNIQUE INDEX uq_episodes_guid ON episodes(guid);
 CREATE INDEX idx_episodes_podcast_id ON episodes(podcast_id);
 CREATE INDEX idx_episodes_updated_at ON episodes(updated_at);
 
--- Segments (chapters) per episode; a segment contains multiple transcript lines.
-CREATE TABLE segments (
+-- Segments (chapters) per episode; a chapter contains multiple transcript lines.
+CREATE TABLE chapter (
   id              UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   episode_id      UUID          NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
-  segment_idx     INT           NOT NULL,
+  chapter_idx     INT           NOT NULL,
   title           TEXT,
   transcript      TEXT,
   summary         TEXT,
-  start_time      INTEGER,
-  end_time        INTEGER,
+  start_time      REAL NOT NULL,
+  end_time        REAL NOT NULL,
   batch_id        UUID          REFERENCES pipeline_batches(id) ON DELETE SET NULL,
   system_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT uq_segments_episode_idx UNIQUE (episode_id, segment_idx),
-  CONSTRAINT ck_segments_segment_idx CHECK (segment_idx >= 0),
-  CONSTRAINT ck_segments_time_range CHECK (end_time >= start_time),
-  CONSTRAINT ck_segments_start_time CHECK (start_time >= 0),
-  CONSTRAINT ck_segments_end_time CHECK (end_time >= 0)
+  CONSTRAINT uq_chapters_episode_idx UNIQUE (episode_id, chapter_idx),
+  CONSTRAINT ck_chapters_chapter_idx CHECK (chapter_idx >= 0),
+  CONSTRAINT ck_chapters_time_range CHECK (end_time >= start_time),
+  CONSTRAINT ck_chapters_start_time CHECK (start_time >= 0),
+  CONSTRAINT ck_chapters_end_time CHECK (end_time >= 0)
 );
 
-CREATE INDEX idx_segments_episode_id ON segments(episode_id);
-CREATE INDEX idx_segments_title ON segments(title);
-CREATE INDEX idx_segments_system_updated_at ON segments(system_updated_at);
+CREATE INDEX idx_chapters_episode_id ON chapter(episode_id);
+CREATE INDEX idx_chapters_title ON chapter(title);
+CREATE INDEX idx_chapters_system_updated_at ON chapter(system_updated_at);
 
--- punkt segmentiert
+-- punkt chapteriert
 CREATE TABLE transcript_lines (
   id              UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-  segment_id      UUID          NOT NULL REFERENCES segments(id) ON DELETE CASCADE,
+  chapter_id      UUID          NOT NULL REFERENCES chapter(id) ON DELETE CASCADE,
   line_idx        INT           NOT NULL,
-  start_time      INTEGER,
-  end_time        INTEGER,
+  start_time      REAL NOT NULL,
+  end_time        REAL NOT NULL,
   text            TEXT NOT NULL,
   emotion         emotion_label DEFAULT 'neutral',
   emotion_score   REAL,
   batch_id        UUID          REFERENCES pipeline_batches(id) ON DELETE SET NULL,
   system_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT uq_transcript_lines_segment_idx UNIQUE (segment_id, line_idx),
+  CONSTRAINT uq_transcript_lines_chapter_idx UNIQUE (chapter_id, line_idx),
   CONSTRAINT ck_transcript_lines_line_idx CHECK (line_idx >= 0),
   CONSTRAINT ck_transcript_lines_start_time CHECK (start_time >= 0),
   CONSTRAINT ck_transcript_lines_emotion_score CHECK (emotion_score IS NULL OR (emotion_score >= 0 AND emotion_score <= 1))
 );
 
-CREATE INDEX idx_transcript_lines_segment_id ON transcript_lines(segment_id);
+CREATE INDEX idx_transcript_lines_chapter_id ON transcript_lines(chapter_id);
 CREATE INDEX idx_transcript_lines_system_updated_at ON transcript_lines(system_updated_at);
 
--- Claims per segment with verdicts and sources.
+-- Claims per chapter with verdicts and sources.
 CREATE TABLE fact_checked_claims (
   id                UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-  segment_id        UUID          NOT NULL REFERENCES segments(id) ON DELETE CASCADE,
+  chapter_id        UUID          NOT NULL REFERENCES chapter(id) ON DELETE CASCADE,
   claim_idx         INT,
   claim             TEXT,
   verdict           fact_verdict DEFAULT 'UNVERIFIABLE',
@@ -132,29 +135,32 @@ CREATE TABLE fact_checked_claims (
   sources           TEXT[],
   batch_id          UUID          REFERENCES pipeline_batches(id) ON DELETE SET NULL,
   system_updated_at TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-  CONSTRAINT uq_fact_checked_claims_segment_idx UNIQUE (segment_id, claim_idx),
+  CONSTRAINT uq_fact_checked_claims_chapter_idx UNIQUE (chapter_id, claim_idx),
   CONSTRAINT ck_fact_checked_claims_claim_idx CHECK (claim_idx >= 0)
 );
 
-CREATE INDEX idx_fact_checked_claims_segment_id ON fact_checked_claims(segment_id);
+CREATE INDEX idx_fact_checked_claims_chapter_id ON fact_checked_claims(chapter_id);
 CREATE INDEX idx_fact_checked_claims_system_updated_at ON fact_checked_claims(system_updated_at);
 
-CREATE TYPE embedding_level AS ENUM ('segment', 'episode', 'podcast');
+CREATE TYPE embedding_level AS ENUM ('chapter', 'episode', 'podcast');
 
 CREATE TABLE embeddings (
   id              UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
-  segment_id      UUID            REFERENCES segments(id) ON DELETE CASCADE,
+  chapter_id      UUID            REFERENCES chapter(id) ON DELETE CASCADE,
   episode_id      UUID            REFERENCES episodes(id) ON DELETE CASCADE,
   podcast_id      UUID            REFERENCES podcasts(id) ON DELETE CASCADE,
   level           embedding_level NOT NULL DEFAULT 'podcast', 
-  embedding       vector(384),
+  embedding       halfvec(2560),
   batch_id        UUID            REFERENCES pipeline_batches(id) ON DELETE SET NULL,
-  system_updated_at TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  system_updated_at TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_embeddings_vector ON embeddings USING hnsw (embedding vector_cosine_ops);
-CREATE INDEX idx_embeddings_system_updated_at ON embeddings(system_updated_at);
+CREATE INDEX idx_embeddings_vector
+ON embeddings
+USING hnsw (embedding halfvec_cosine_ops);
 
+CREATE INDEX idx_embeddings_system_updated_at
+ON embeddings(system_updated_at);
 -- Fact-checked claims are stored in fact_checked_claims.
 
 -- Timestamp maintenance for technical columns.
@@ -186,8 +192,8 @@ CREATE TRIGGER set_timestamp_episodes
   BEFORE UPDATE ON episodes
   FOR EACH ROW EXECUTE FUNCTION trigger_set_system_timestamp();
 
-CREATE TRIGGER set_timestamp_segments
-  BEFORE UPDATE ON segments
+CREATE TRIGGER set_timestamp_chapters
+  BEFORE UPDATE ON chapter
   FOR EACH ROW EXECUTE FUNCTION trigger_set_system_timestamp();
 
 CREATE TRIGGER set_timestamp_transcript_lines
