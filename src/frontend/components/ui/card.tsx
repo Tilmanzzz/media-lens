@@ -33,7 +33,7 @@ export function InfoCard({
       <div className="p-4">
         <p className=" mt-1 text-xs text-foreground-subtle">Episode {episodeNr} - {titlePodcast}</p>
         <h3 className=" mt-1 text-xl font-semibold text-foreground">{titleEpi}</h3>
-        <p className="mt-2 line-clamp-2 text-sm text-foreground-muted">
+        <p className="mt-2 line-clamp-2 text-sm hover:text-primary-muted text-foreground-muted">
           {description}
         </p>
         <div className="flex mt-3 items-center justify-between text-sm text-foreground-muted">

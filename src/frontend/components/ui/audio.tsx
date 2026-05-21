@@ -1,9 +1,11 @@
-"use client"
+"use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, MutableRefObject } from "react";
 
 interface AudioPlayerProps {
   src: string;
+  onTimeUpdate?: (time: number) => void;
+  seekRef?: MutableRefObject<((time: number) => void) | null>;
 }
 
 function formatTime(seconds: number): string {
@@ -12,7 +14,7 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export default function AudioPlayer({ src }: AudioPlayerProps) {
+export default function AudioPlayer({ src, onTimeUpdate, seekRef }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(0);
@@ -22,7 +24,10 @@ export default function AudioPlayer({ src }: AudioPlayerProps) {
     const audio = audioRef.current;
     if (!audio) return;
 
-    const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
+    const handleTimeUpdate = () => {
+      setCurrentTime(audio.currentTime);
+      onTimeUpdate?.(audio.currentTime);
+    };
     const handleLoadedMetadata = () => setDuration(audio.duration);
     const handleEnded = () => setIsPlaying(false);
 
@@ -35,12 +40,27 @@ export default function AudioPlayer({ src }: AudioPlayerProps) {
       audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
       audio.removeEventListener("ended", handleEnded);
     };
-  }, []);
+  }, [onTimeUpdate]);
+
+  // Seek-Funktion nach außen verfügbar machen
+  useEffect(() => {
+    if (seekRef) {
+      seekRef.current = (time: number) => {
+        const audio = audioRef.current;
+        if (!audio) return;
+        audio.currentTime = time;
+        setCurrentTime(time);
+        if (!isPlaying) {
+          audio.play();
+          setIsPlaying(true);
+        }
+      };
+    }
+  }, [seekRef, isPlaying]);
 
   const togglePlay = (): void => {
     const audio = audioRef.current;
     if (!audio) return;
-
     if (isPlaying) {
       audio.pause();
     } else {
@@ -52,23 +72,25 @@ export default function AudioPlayer({ src }: AudioPlayerProps) {
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>): void => {
     const audio = audioRef.current;
     if (!audio) return;
-
     const newTime = parseFloat(e.target.value);
     audio.currentTime = newTime;
     setCurrentTime(newTime);
+    onTimeUpdate?.(newTime);
   };
 
   return (
-    <div className=" flex items-center ">
+    <div className="flex items-center gap-4 px-6 py-5 max-w-5xl rounded-xl bg-background-card border border-border">
       <audio ref={audioRef} src={src} />
 
-      {/* Play / Pause Button */}
-      <button onClick={togglePlay} style={styles.playButton} aria-label={isPlaying ? "Pause" : "Play"}>
+      <button
+        onClick={togglePlay}
+        aria-label={isPlaying ? "Pause" : "Play"}
+        className="shrink-0 w-10 h-10 rounded-full bg-accent hover:bg-accent-hover flex items-center justify-center transition-colors cursor-pointer"
+      >
         {isPlaying ? <PauseIcon /> : <PlayIcon />}
       </button>
 
-      {/* Progress + Times */}
-      <div style={styles.trackWrapper}>
+      <div className="flex flex-col  gap-1.5 flex-1">
         <input
           type="range"
           min={0}
@@ -76,10 +98,10 @@ export default function AudioPlayer({ src }: AudioPlayerProps) {
           step={0.1}
           value={currentTime}
           onChange={handleSeek}
-          style={styles.progressBar}
           aria-label="Seek"
+          className="w-full cursor-pointer accent-accent"
         />
-        <div style={styles.times}>
+        <div className="flex justify-between text-xs text-foreground-subtle">
           <span>{formatTime(currentTime)}</span>
           <span>{formatTime(duration)}</span>
         </div>
@@ -90,7 +112,7 @@ export default function AudioPlayer({ src }: AudioPlayerProps) {
 
 function PlayIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="var(--background)">
       <polygon points="5 3 19 12 5 21" />
     </svg>
   );
@@ -98,52 +120,9 @@ function PlayIcon() {
 
 function PauseIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="var(--background)">
       <rect x="5" y="4" width="4" height="16" />
       <rect x="15" y="4" width="4" height="16" />
     </svg>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    display: "flex",
-    alignItems: "center",
-    gap: "1rem",
-    padding: "1.25rem 1.5rem",
-    background: "",
-    border: "0.5px solid #e0e0e0",
-    borderRadius: "12px",
-    maxWidth: "420px",
-    fontFamily: "sans-serif",
-  },
-  playButton: {
-    flexShrink: 0,
-    width: "40px",
-    height: "40px",
-    borderRadius: "50%",
-    background: "#1D9E75",
-    border: "none",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  trackWrapper: {
-    flex: 1,
-    display: "flex",
-    flexDirection: "column",
-    gap: "6px",
-  },
-  progressBar: {
-    width: "100%",
-    accentColor: "#1D9E75",
-    cursor: "pointer",
-  },
-  times: {
-    display: "flex",
-    justifyContent: "space-between",
-    fontSize: "12px",
-    color: "#888",
-  },
-};
