@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
+from common.app_logger import AppLogger
 from common.db_connector import DbConnector
 
 
@@ -13,37 +17,75 @@ class LoadContext:
     connector: DbConnector
     watermark: Optional[datetime]
     processing_update_ts: Optional[datetime] = None
+    logger: Optional[AppLogger] = None
+    dry_run: bool = False
 
 
-def _print_delta_debug(
+def load_json_config(config_path: Optional[str], base_dir: Optional[Path] = None) -> Dict[str, Any]:
+    if not config_path:
+        return {}
+
+    path = Path(config_path).expanduser()
+    if not path.is_absolute():
+        if base_dir is not None:
+            path = base_dir / path
+        else:
+            path = Path(__file__).resolve().parent / path
+
+    with path.open("r", encoding="utf-8") as handle:
+        data = json.load(handle)
+
+    if not isinstance(data, dict):
+        raise ValueError(f"Config file must contain a JSON object: {path}")
+
+    return data
+
+
+def build_pipeline_logger(
+    module_name: str,
+    enabled: bool,
+    level: str,
+    log_dir: Optional[str],
+    log_file: Optional[str],
+) -> logging.Logger:
+    return AppLogger(
+        module_name=module_name,
+        enabled=enabled,
+        level=level,
+        log_dir=log_dir,
+        log_file=log_file,
+    ).build()
+
+
+def _format_delta_debug(
     step: str,
     level: Optional[str],
     chunk: Dict[str, Any],
     ctx: Optional[LoadContext],
     end_ts: Optional[datetime],
 ) -> str:
-    id = chunk.get("chapter_id") or chunk.get("transcript_line_id") or chunk.get("episode_id") or chunk.get("podcast_id")
+    chunk_id = chunk.get("chapter_id") or chunk.get("transcript_line_id") or chunk.get("episode_id") or chunk.get("podcast_id")
     preprocessing_update_at = chunk.get("preprocessing_update_ts")
-    processing_update_at =chunk.get("processing_update_ts")
+    processing_update_at = chunk.get("processing_update_ts")
     watermark = ctx.watermark if ctx is not None else None
 
     if ctx is None or ctx.mode == "full":
-        state = "full load"
+        state = "full_load"
     elif watermark is None:
-        state = "watermark is none"
+        state = "none_watermark"
     elif processing_update_at is None:
-        state = "processing_update_at is None"
-    elif watermark < preprocessing_update_at:
-        state = "delta load (watermark < preprocessing_update_at)"
+        state = "none_update_at"
+    elif preprocessing_update_at is not None and watermark > preprocessing_update_at:
+        state = "watermark_gt_update_at"
     else:
-        state = "undefined"
+        state = "update_at_gte_watermark"
 
-    print(f"step={step} level={level} id={id}")
-    print(f"  > state={state}")
-    print(f"  > preprocessing_update_at={preprocessing_update_at}")
-    print(f"  > processing_update_at={processing_update_at}")
-    print(f"  > watermark_start_ts={watermark}")
-    print(f"  > watermark_end_ts={end_ts}")
+    return (
+        f"step={step} level={level} id={chunk_id} | state={state} | "
+        f"preprocessing_update_at={preprocessing_update_at} | "
+        f"processing_update_at={processing_update_at} | "
+        f"watermark_start_ts={watermark} | watermark_end_ts={end_ts}"
+    )
 
 def _build_fetch_spec(step: str, level: Optional[str]) -> Dict[str, str]:
     if step == "text_summarizer" or step == "fact_checking":
@@ -149,6 +191,7 @@ def fetch_chunks(
     ids: Optional[Set[str]] = None,
     ctx: Optional[LoadContext] = None,
     end_ts: Optional[datetime] = None,
+    logger: Optional[logging.Logger] = None,
 ) -> List[Dict[str, Any]]:
     spec = _build_fetch_spec(step, level)
 
@@ -180,7 +223,6 @@ def fetch_chunks(
         {where_clause}
         ORDER BY {spec['order_by']}
     """
-    # print("Executing SQL with params:", sql, params)
 
     chunks: List[Dict[str, Any]] = []
     with conn.cursor() as cur:
@@ -190,7 +232,9 @@ def fetch_chunks(
 
         for row in rows:
             chunk = dict(zip(column_names, row))
-            _print_delta_debug(step, level, chunk, ctx, end_ts)
+            debug_message = _format_delta_debug(step, level, chunk, ctx, end_ts)
+            if logger is not None:
+                logger.debug(debug_message)
             chunks.append(chunk)
 
     return chunks

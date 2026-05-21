@@ -1,8 +1,6 @@
 {
   "chunks": [
     {
-      "podcast_id": 1,
-      "podcast_title": "Data Stories",
       "episode_id": 101,
       "episode_title": "What Is Data Engineering",
       "segment_id": 1,
@@ -10,8 +8,6 @@
       "transcript_text": "In this segment we define data engineering and explain why reliable pipelines are the foundation of analytics products."
     },
     {
-      "podcast_id": 1,
-      "podcast_title": "Data Stories",
       "episode_id": 101,
       "episode_title": "What Is Data Engineering",
       "segment_id": 1,
@@ -19,8 +15,6 @@
       "transcript_text": "The host emphasizes batch and streaming patterns and how orchestration tools help teams avoid fragile ad hoc scripts."
     },
     {
-      "podcast_id": 1,
-      "podcast_title": "Data Stories",
       "episode_id": 101,
       "episode_title": "What Is Data Engineering",
       "segment_id": 2,
@@ -28,8 +22,6 @@
       "transcript_text": "The conversation shifts to data quality and observability, including lineage, alerts, and ownership between platform and analytics teams."
     },
     {
-      "podcast_id": 1,
-      "podcast_title": "Data Stories",
       "episode_id": 101,
       "episode_title": "What Is Data Engineering",
       "segment_id": 2,

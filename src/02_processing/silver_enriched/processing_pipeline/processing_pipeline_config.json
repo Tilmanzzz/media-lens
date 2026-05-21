@@ -1,0 +1,16 @@
+{
+  "mode": "delta",
+  "stage": "processing",
+  "watermark": null,
+  "batch_id": null,
+  "dry_run": false,
+  "steps": "text_summarizer",
+  "testing": false,
+  "test_episode_id": null,
+  "test_chapter_limit": 3,
+  "test_end_watermark": null,
+  "log_enabled": true,
+  "log_level": "INFO",
+  "log_dir": "../logs",
+  "log_file": "processing_pipeline.log"
+}

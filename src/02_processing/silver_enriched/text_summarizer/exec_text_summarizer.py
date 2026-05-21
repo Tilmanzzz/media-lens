@@ -30,11 +30,8 @@ def load_chunks(input_path: str | Path) -> List[Dict[str, Any]]:
     raise ValueError("Input JSON must be a list of chunks or an object with a 'chunks' list.")
 
 
-def apply_filters(chunks: List[Dict[str, Any]], podcast_id: Any, episode_id: Any, chapter_id: Any) -> List[Dict[str, Any]]:
+def apply_filters(chunks: List[Dict[str, Any]], episode_id: Any, chapter_id: Any) -> List[Dict[str, Any]]:
     filtered = chunks
-
-    if podcast_id is not None:
-        filtered = [c for c in filtered if c.get("podcast_id") == podcast_id]
 
     if episode_id is not None:
         filtered = [c for c in filtered if c.get("episode_id") == episode_id]
@@ -48,21 +45,14 @@ def apply_filters(chunks: List[Dict[str, Any]], podcast_id: Any, episode_id: Any
 def print_episode_summaries(episode_summaries: List[Dict[str, Any]]) -> None:
     for summary in episode_summaries:
         print("\n--- EPISODE ---")
-        print(
-            f"Podcast {summary['podcast_id']} ({summary['podcast_title']}) | "
-            f"Episode {summary['episode_id']} ({summary['episode_title']})"
-        )
+        print(f"Episode {summary['episode_id']} ({summary['episode_title']})")
         print(summary["summary"])
 
 
 def print_chapter_summaries(chapter_summaries: List[Dict[str, Any]]) -> None:
     for summary in chapter_summaries:
         print("\n--- chapter ---")
-        print(
-            f"Podcast {summary['podcast_id']} ({summary['podcast_title']}) | "
-            f"Episode {summary['episode_id']} ({summary['episode_title']}) | "
-            f"chapter {summary['chapter_id']}"
-        )
+        print(f"Episode {summary['episode_id']} ({summary['episode_title']}) | chapter {summary['chapter_id']}")
         print(summary["summary"])
 
 
@@ -73,7 +63,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", default=None, help="Path to chunks input JSON")
     parser.add_argument("--mode", choices=["episode", "chapter", "both"], default=None)
 
-    parser.add_argument("--podcast-id", type=int, default=None)
     parser.add_argument("--episode-id", type=int, default=None)
     parser.add_argument("--chapter-id", type=int, default=None)
 
@@ -94,7 +83,7 @@ def main() -> None:
     output_path = args.output or config.default_output_path
 
     chunks = load_chunks(input_path)
-    filtered_chunks = apply_filters(chunks, args.podcast_id, args.episode_id, args.chapter_id)
+    filtered_chunks = apply_filters(chunks, args.episode_id, args.chapter_id)
 
     if not filtered_chunks:
         summarizer.logger.warning("No chunks matched the selected filters")

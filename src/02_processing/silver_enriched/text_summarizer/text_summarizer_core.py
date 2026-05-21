@@ -94,18 +94,18 @@ Return ONLY the summary, no explanations or commentary.
         ).build()
 
     @staticmethod
-    def group_by_episode(chunks: List[Dict[str, Any]]) -> Dict[Tuple[Any, Any], List[Dict[str, Any]]]:
-        grouped: Dict[Tuple[Any, Any], List[Dict[str, Any]]] = defaultdict(list)
+    def group_by_episode(chunks: List[Dict[str, Any]]) -> Dict[Any, List[Dict[str, Any]]]:
+        grouped: Dict[Any, List[Dict[str, Any]]] = defaultdict(list)
         for chunk in chunks:
-            key = (chunk["podcast_id"], chunk["episode_id"])
+            key = chunk["episode_id"]
             grouped[key].append(chunk)
         return grouped
 
     @staticmethod
-    def group_by_chapter(chunks: List[Dict[str, Any]]) -> Dict[Tuple[Any, Any, Any], List[Dict[str, Any]]]:
-        grouped: Dict[Tuple[Any, Any, Any], List[Dict[str, Any]]] = defaultdict(list)
+    def group_by_chapter(chunks: List[Dict[str, Any]]) -> Dict[Tuple[Any, Any], List[Dict[str, Any]]]:
+        grouped: Dict[Tuple[Any, Any], List[Dict[str, Any]]] = defaultdict(list)
         for chunk in chunks:
-            key = (chunk["podcast_id"], chunk["episode_id"], chunk["chapter_id"])
+            key = (chunk["episode_id"], chunk["chapter_id"])
             grouped[key].append(chunk)
         return grouped
 
@@ -150,18 +150,16 @@ Return ONLY the summary, no explanations or commentary.
         grouped = self.group_by_episode(chunks)
         results: List[Dict[str, Any]] = []
 
-        for (podcast_id, episode_id), episode_chunks in grouped.items():
+        for episode_id, episode_chunks in grouped.items():
             ordered = self._sort_episode_chunks(episode_chunks)
             summary = self.summarize_episode_chunks(ordered)
 
             if not ordered:
                 continue
 
-            self.logger.info("Episode summary created: podcast=%s episode=%s", podcast_id, episode_id)
+            self.logger.info("Episode summary created: episode=%s", episode_id)
             results.append(
                 {
-                    "podcast_id": podcast_id,
-                    "podcast_title": ordered[0].get("podcast_title", ""),
                     "episode_id": episode_id,
                     "episode_title": ordered[0].get("episode_title", ""),
                     "summary": summary,
@@ -174,23 +172,16 @@ Return ONLY the summary, no explanations or commentary.
         grouped = self.group_by_chapter(chunks)
         results: List[Dict[str, Any]] = []
 
-        for (podcast_id, episode_id, chapter_id), chapter_chunks in grouped.items():
+        for (episode_id, chapter_id), chapter_chunks in grouped.items():
             ordered = self._sort_chapter_chunks(chapter_chunks)
             summary = self.summarize_chapter_chunks(ordered)
 
             if not ordered:
                 continue
 
-            self.logger.info(
-                "chapter summary created: podcast=%s episode=%s chapter=%s",
-                podcast_id,
-                episode_id,
-                chapter_id,
-            )
+            self.logger.info("Chapter summary created: episode=%s chapter=%s", episode_id, chapter_id)
             results.append(
                 {
-                    "podcast_id": podcast_id,
-                    "podcast_title": ordered[0].get("podcast_title", ""),
                     "episode_id": episode_id,
                     "episode_title": ordered[0].get("episode_title", ""),
                     "chapter_id": chapter_id,

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
 import importlib.util
+from datetime import datetime, timezone
 from pathlib import Path
 import sys
 from typing import Optional
@@ -14,48 +14,59 @@ if str(SRC_DIR) not in sys.path:
 from common.db_connector import DbConnector
 from silver_enriched.processing_pipeline.pipeline_utils import (
     LoadContext,
+    build_pipeline_logger,
     finalize_pipeline_batch,
+    load_json_config,
     start_pipeline_batch,
 )
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Run processing pipeline steps (full or delta)."
-    )
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--config", default=None, help="Path to pipeline args JSON config")
+    pre_args, remaining = pre_parser.parse_known_args()
+
+    parser = argparse.ArgumentParser(description="Run processing pipeline steps (full or delta).")
+    parser.add_argument("--config", default="processing_pipeline_config.json", help="Path to pipeline args JSON config")
     parser.add_argument("--mode", choices=["full", "delta"], default="delta")
     parser.add_argument("--stage", default="processing", help="pipeline_batches.stage for watermark lookup")
     parser.add_argument("--watermark", default=None, help="ISO timestamp override for delta load")
     parser.add_argument("--batch-id", default=None, help="Optional batch UUID override")
+    parser.add_argument(
+        "--dry-run",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Run without writing database updates or creating pipeline batches",
+    )
     parser.add_argument(
         "--steps",
         default="text_summarizer",
         help="Comma-separated steps to run, or 'processing' for all steps",
     )
     parser.add_argument("--testing", action="store_true", help="Enable test run parameters")
-    parser.add_argument(
-        "--test-episode-id",
-        type=str,
-        default=None,
-        help="Test run: episode id",
-    )
-    parser.add_argument(
-        "--test-chapter-limit",
-        type=int,
-        default=3,
-        help="Test run: max chapters",
-    )
+    parser.add_argument("--test-episode-id", type=str, default=None, help="Test run: episode id")
+    parser.add_argument("--test-chapter-limit", type=int, default=3, help="Test run: max chapters")
     parser.add_argument(
         "--test-end-watermark",
         default=None,
         help="Test run: upper bound watermark (ISO timestamp)",
     )
     parser.add_argument(
-        "--text-summarizer-config",
-        default=None,
-        help="Optional path to text_summarizer config JSON",
+        "--log-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable pipeline logging",
     )
-    return parser.parse_args()
+    parser.add_argument("--log-level", default="INFO", help="Pipeline logger level")
+    parser.add_argument("--log-dir", default="../logs", help="Optional pipeline log directory")
+    parser.add_argument("--log-file", default="processing_pipeline.log", help="Pipeline log file name")
+
+    config = load_json_config(pre_args.config or parser.get_default("config"), base_dir=Path(__file__).resolve().parent)
+    if config:
+        parser.set_defaults(**config)
+
+    return parser.parse_args(remaining)
+
 
 def load_step_module(step_path: Path):
     module_name = step_path.stem.replace("-", "_")
@@ -70,14 +81,30 @@ def load_step_module(step_path: Path):
 def main() -> None:
     args = parse_args()
     steps = {step.strip() for step in args.steps.split(",") if step.strip()}
-    print("steps to execute:", steps)
-    
+
+    logger = build_pipeline_logger(
+        module_name="processing_pipeline_runner",
+        enabled=args.log_enabled,
+        level=args.log_level,
+        log_dir=args.log_dir,
+        log_file=args.log_file,
+    )
+    logger.info("Starting processing pipeline run")
+    logger.debug("steps to execute: %s", steps)
+
     connector = DbConnector()
     with connector.get_connection() as conn:
         stage = args.stage or "processing"
         load_mode = "full" if args.mode == "full" else "delta"
-        batch_id = args.batch_id or start_pipeline_batch(conn, stage, load_mode)
-        args.batch_id = batch_id
+        batch_id: Optional[str] = None
+
+        if args.dry_run:
+            logger.info("Dry run enabled: skipping pipeline batch creation and database writes")
+            args.batch_id = None
+        else:
+            batch_id = args.batch_id or start_pipeline_batch(conn, stage, load_mode)
+            args.batch_id = batch_id
+
         new_processing_update_ts = datetime.now(timezone.utc)
 
         try:
@@ -90,9 +117,11 @@ def main() -> None:
                 watermark=watermark,
                 connector=connector,
                 processing_update_ts=new_processing_update_ts,
+                logger=logger,
+                dry_run=args.dry_run,
             )
-            print("Start watermark:", watermark)
-            print("End watermark:", args.test_end_watermark)
+            logger.info("Start watermark: %s", watermark)
+            logger.info("End watermark: %s", args.test_end_watermark)
 
             base_dir = Path(__file__).resolve().parent
             step_map = {
@@ -110,13 +139,18 @@ def main() -> None:
                 module = load_step_module(step_path)
                 if not hasattr(module, "run_step"):
                     raise RuntimeError(f"Step module missing run_step: {step_path}")
-                print(f"------ Starting step: {step} ------")
-                module.run_step(conn, ctx, args)
-                print(f"------ Completed step: {step} ------")
 
-            finalize_pipeline_batch(conn, batch_id, "success")
+                logger.info("Starting step: %s", step)
+                module.run_step(conn, ctx, args)
+                logger.info("Completed step: %s", step)
+
+            if not args.dry_run and batch_id is not None:
+                finalize_pipeline_batch(conn, batch_id, "success")
+            logger.info("Processing pipeline run finished successfully")
         except (KeyboardInterrupt, Exception):
-            finalize_pipeline_batch(conn, batch_id, "failed")
+            if not args.dry_run and batch_id is not None:
+                finalize_pipeline_batch(conn, batch_id, "failed")
+            logger.exception("Processing pipeline run failed")
             raise
 
 
