@@ -10,18 +10,13 @@ SRC_DIR = str(Path(__file__).resolve()).split("src")[0] + "src\\02_processing"
 if str(SRC_DIR) not in sys.path:
     sys.path.append(str(SRC_DIR))
 
-from silver_enriched.text_summarizer.text_summarizer_config import TextSummarizerConfig
 from silver_enriched.text_summarizer.text_summarizer_core import TextSummarizer
 
 from common.db_connector import DbConnector
 from silver_enriched.processing_pipeline.pipeline_utils import (
     LoadContext,
-    expand_targets_from_chunks,
     fetch_chapter_ids_for_episode,
     fetch_chunks,
-    fetch_delta_targets,
-    should_include,
-    should_include_between,
 )
 
 
@@ -104,14 +99,13 @@ def update_chapter_summaries(
     return updated
 
 def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
-    episode_ids = None
     chapter_ids = None
+    end_ts = None
 
     if args.testing and args.test_end_watermark:
-        episode_ids = None
-        chapter_ids = None
-    elif args.testing and args.test_episode_id:
-        episode_ids = {str(args.test_episode_id)}
+        end_ts = ctx.connector.parse_ts(args.test_end_watermark)
+
+    if args.testing and args.test_episode_id:
         chapter_ids = set(
             fetch_chapter_ids_for_episode(
                 conn,
@@ -123,47 +117,25 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
             print("text_summarizer: No chapters found for test episode.")
             return
 
-    if ctx.mode == "delta" and not (args.testing and args.test_episode_id):
-        # use chapter-level processing_updated_at when checking watermark
-        episode_ids, chapter_ids = fetch_delta_targets(conn, ctx, update_ts_level="chapter")
-        if not episode_ids and not chapter_ids:
-            print("text_summarizer: No delta changes detected.")
-            return
-
-    chunks = fetch_chunks(conn, episode_ids, chapter_ids, update_ts_level="chapter")
+    chunks = fetch_chunks(
+        conn,
+        step="text_summarizer",
+        level="chapter",
+        ids=chapter_ids,
+        ctx=ctx,
+        end_ts=end_ts,
+    )
     if not chunks:
         print("text_summarizer: No chunks found.")
         return
-
-    if ctx.mode == "delta" and not (args.testing and args.test_episode_id):
-        end_ts = None
-        if args.testing and args.test_end_watermark:
-            end_ts = ctx.connector.parse_ts(args.test_end_watermark)
-        delta_chunks: List[Dict[str, Any]] = []
-        print("chunks count: ", len(chunks))
-        for chunk in chunks:
-            print(f"chunk: {chunk.get('chapter_id')} source_update_ts: {chunk.get('source_update_ts').isoformat() if chunk.get('source_update_ts') else 'None'}")
-            ts = ctx.connector.parse_ts(chunk.get("source_update_ts"))
-            if args.testing and end_ts is not None:
-                include = should_include_between(ts, ctx.watermark, end_ts)
-            else:
-                include = should_include(ts, ctx)
-            if include:
-                delta_chunks.append(chunk)
-
-        if not delta_chunks:
-            print("text_summarizer: No chunks matched delta filter.")
-            return
-
-        episode_ids, chapter_ids = expand_targets_from_chunks(delta_chunks)
-        chunks = fetch_chunks(conn, episode_ids, chapter_ids, update_ts_level="chapter")
-
-    summarizer = TextSummarizer()
-    print(summarizer.config)
+        
+    config_path = getattr(args, "text_summarizer_config", None) or getattr(args, "config", None)
+    summarizer = TextSummarizer(config_path=config_path)
 
     episode_summaries = summarizer.summarize_all_episodes(chunks)
     chapter_summaries = summarizer.summarize_all_chapters(chunks)
 
+    print("------ Starting Update: Episode ------")
     total_updates = 0
     total_updates += update_episode_summaries(
         conn,
@@ -171,6 +143,7 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
         args.batch_id,
         ctx.processing_update_ts,
     )
+    print("------ Starting Update: Chapter ------")
     total_updates += update_chapter_summaries(
         conn,
         chapter_summaries,
@@ -178,7 +151,8 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
         ctx.processing_update_ts,
     )
     conn.commit()
-    print(f"text_summarizer: Done. Rows updated: {total_updates}")
+    print(f"Rows updated: {total_updates}")
+    print("------ End step: text_summarizer ------")
 
 
 def main() -> None:

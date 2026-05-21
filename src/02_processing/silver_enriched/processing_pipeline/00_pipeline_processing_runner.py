@@ -50,6 +50,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Test run: upper bound watermark (ISO timestamp)",
     )
+    parser.add_argument(
+        "--text-summarizer-config",
+        default=None,
+        help="Optional path to text_summarizer config JSON",
+    )
     return parser.parse_args()
 
 def load_step_module(step_path: Path):
@@ -73,7 +78,7 @@ def main() -> None:
         load_mode = "full" if args.mode == "full" else "delta"
         batch_id = args.batch_id or start_pipeline_batch(conn, stage, load_mode)
         args.batch_id = batch_id
-        processing_update_ts = datetime.now(timezone.utc)
+        new_processing_update_ts = datetime.now(timezone.utc)
 
         try:
             watermark = connector.parse_ts(args.watermark)
@@ -84,10 +89,10 @@ def main() -> None:
                 mode=args.mode,
                 watermark=watermark,
                 connector=connector,
-                processing_update_ts=processing_update_ts,
+                processing_update_ts=new_processing_update_ts,
             )
-            print("start watermark {} - end watermark: {} -  stage '{}': {}".format(watermark, args.test_end_watermark, stage, processing_update_ts))
-            print("processing context (ctx):", ctx)
+            print("Start watermark:", watermark)
+            print("End watermark:", args.test_end_watermark)
 
             base_dir = Path(__file__).resolve().parent
             step_map = {

@@ -24,8 +24,11 @@ class TextSummarizer:
         logging_enabled: Optional[bool] = None,
         log_level: Optional[str] = None,
     ) -> None:
-        if config is None and config_path is not None:
-            config = TextSummarizerConfig.from_file(config_path)
+        if config is None:
+            if config_path is not None:
+                config = TextSummarizerConfig.from_file(config_path)
+            else:
+                config = TextSummarizerConfig.from_file("text_summarizer_config.json")
         self.config = config or TextSummarizerConfig()
 
         self._setup_logger(logging_enabled=logging_enabled, log_level=log_level)

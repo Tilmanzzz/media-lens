@@ -157,16 +157,37 @@ CREATE INDEX idx_fact_checked_claims_chapter_id ON fact_checked_claims(chapter_i
 CREATE INDEX idx_fact_checked_claims_processing_updated_at ON fact_checked_claims(processing_updated_at);
 
 CREATE TYPE embedding_level AS ENUM ('chapter', 'episode', 'podcast');
-
 CREATE TABLE embeddings (
-  id              UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
-  chapter_id      UUID            REFERENCES chapter(id) ON DELETE CASCADE,
-  episode_id      UUID            REFERENCES episodes(id) ON DELETE CASCADE,
-  podcast_id      UUID            REFERENCES podcasts(id) ON DELETE CASCADE,
-  level           embedding_level NOT NULL DEFAULT 'podcast', 
-  embedding       halfvec(2560),
-  batch_id        UUID            REFERENCES pipeline_batches(id) ON DELETE SET NULL,
-  processing_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  chapter_id UUID REFERENCES chapter(id) ON DELETE CASCADE,
+  episode_id UUID REFERENCES episodes(id) ON DELETE CASCADE,
+  podcast_id UUID REFERENCES podcasts(id) ON DELETE CASCADE,
+  level embedding_level NOT NULL,
+  embedding halfvec(2560),
+  batch_id UUID REFERENCES pipeline_batches(id) ON DELETE SET NULL,
+  processing_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT embeddings_level_fk_check CHECK (
+    (
+      level = 'podcast'
+      AND podcast_id IS NOT NULL
+      AND episode_id IS NULL
+      AND chapter_id IS NULL
+    )
+    OR
+    (
+      level = 'episode'
+      AND episode_id IS NOT NULL
+      AND podcast_id IS NULL
+      AND chapter_id IS NULL
+    )
+    OR
+    (
+      level = 'chapter'
+      AND chapter_id IS NOT NULL
+      AND podcast_id IS NULL
+      AND episode_id IS NULL
+    )
+  )
 );
 
 CREATE INDEX idx_embeddings_vector

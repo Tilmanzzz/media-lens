@@ -71,7 +71,7 @@ Testmodi sind nur aktiv, wenn `--testing` gesetzt ist.
 
 - Start: `--watermark` oder Watermark aus der DB.
 - Ende: `--test-end-watermark`.
-- Include-Regel: `start < source_update_ts <= end`.
+- Include-Regel: `start < processing_update_ts <= end`.
 
 ### Episode-Limit
 
@@ -83,8 +83,8 @@ Wenn `--test-end-watermark` gesetzt ist, hat das Testfenster Vorrang.
 ## Include- und Exclude-Regeln
 
 - Full-Load: immer include.
-- Delta-Load: include nur, wenn `source_update_ts > watermark`.
-- Delta-Testfenster: include nur, wenn `watermark < source_update_ts <= test_end_watermark`.
+- Delta-Load: include nur, wenn `processing_update_ts > watermark`.
+- Delta-Testfenster: include nur, wenn `watermark < processing_update_ts <= test_end_watermark`.
 
 ## Aktueller Step: Text Summarizer
 
