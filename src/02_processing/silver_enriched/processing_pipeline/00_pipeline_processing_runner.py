@@ -89,28 +89,36 @@ def main() -> None:
         log_dir=args.log_dir,
         log_file=args.log_file,
     )
-    logger.info("Starting processing pipeline run")
-    logger.debug("steps to execute: %s", steps)
+    logger.info(
+        "pipeline: start mode=%s stage=%s dry_run=%s steps=%s batch_id=%s",
+        args.mode,
+        args.stage,
+        args.dry_run,
+        ",".join(sorted(steps)),
+        args.batch_id or "-",
+    )
 
     connector = DbConnector()
-    with connector.get_connection() as conn:
+    with connector.get_connection(logger=logger) as conn:
         stage = args.stage or "processing"
         load_mode = "full" if args.mode == "full" else "delta"
         batch_id: Optional[str] = None
 
         if args.dry_run:
-            logger.info("Dry run enabled: skipping pipeline batch creation and database writes")
+            logger.info("pipeline: dry run, skip batch write")
             args.batch_id = None
         else:
-            batch_id = args.batch_id or start_pipeline_batch(conn, stage, load_mode)
+            batch_id = args.batch_id or start_pipeline_batch(conn, stage, load_mode, logger=logger)
             args.batch_id = batch_id
+            logger.info("pipeline: batch id=%s stage=%s load_mode=%s", batch_id, stage, load_mode)
 
         new_processing_update_ts = datetime.now(timezone.utc)
 
         try:
             watermark = connector.parse_ts(args.watermark)
             if args.mode == "delta" and watermark is None:
-                watermark = connector.get_watermark(conn, stage)
+                logger.info("watermark: resolve stage=%s", stage)
+                watermark = connector.get_watermark(conn, stage, logger=logger)
 
             ctx = LoadContext(
                 mode=args.mode,
@@ -120,8 +128,7 @@ def main() -> None:
                 logger=logger,
                 dry_run=args.dry_run,
             )
-            logger.info("Start watermark: %s", watermark)
-            logger.info("End watermark: %s", args.test_end_watermark)
+            logger.info("watermark: mode=%s value=%s", args.mode, watermark)
 
             base_dir = Path(__file__).resolve().parent
             step_map = {
@@ -140,17 +147,17 @@ def main() -> None:
                 if not hasattr(module, "run_step"):
                     raise RuntimeError(f"Step module missing run_step: {step_path}")
 
-                logger.info("Starting step: %s", step)
+                logger.info("step: start %s", step)
                 module.run_step(conn, ctx, args)
-                logger.info("Completed step: %s", step)
+                logger.info("step: done %s", step)
 
             if not args.dry_run and batch_id is not None:
-                finalize_pipeline_batch(conn, batch_id, "success")
-            logger.info("Processing pipeline run finished successfully")
+                finalize_pipeline_batch(conn, batch_id, "success", logger=logger)
+            logger.info("pipeline: done batch_id=%s", batch_id or "-")
         except (KeyboardInterrupt, Exception):
             if not args.dry_run and batch_id is not None:
-                finalize_pipeline_batch(conn, batch_id, "failed")
-            logger.exception("Processing pipeline run failed")
+                finalize_pipeline_batch(conn, batch_id, "failed", logger=logger)
+            logger.exception("pipeline: failed batch_id=%s", batch_id or "-")
             raise
 
 

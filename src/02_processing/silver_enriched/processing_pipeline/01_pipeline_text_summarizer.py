@@ -71,17 +71,22 @@ def update_episode_summaries(
     summaries: Iterable[Dict[str, Any]],
     batch_id: Optional[str],
     processing_update_ts: Optional[datetime],
+    logger=None,
 ) -> int:
 
     if processing_update_ts is None:
         raise ValueError("processing_update_ts is required for processing writes")
 
+    summaries = list(summaries)
     sql = (
         "UPDATE episodes SET summary = %s, processing_updated_at = %s, batch_id = %s "
         "WHERE id = %s"
     )
 
     updated = 0
+
+    if logger is not None:
+        logger.info("DB write start: episode summaries count=%d batch_id=%s", len(summaries), batch_id or "-")
 
     with conn.cursor() as cur:
         for summary in summaries:
@@ -94,6 +99,9 @@ def update_episode_summaries(
             cur.execute(sql, (text, processing_update_ts, batch_id, episode_id))
             updated += cur.rowcount
 
+    if logger is not None:
+        logger.info("DB write done: episode summaries rows=%d", updated)
+
     return updated
 
 
@@ -102,16 +110,21 @@ def update_chapter_summaries(
     summaries: Iterable[Dict[str, Any]],
     batch_id: Optional[str],
     processing_update_ts: Optional[datetime],
+    logger=None,
 ) -> int:
 
     if processing_update_ts is None:
         raise ValueError("processing_update_ts is required for processing writes")
 
+    summaries = list(summaries)
     sql = (
         "UPDATE chapter SET summary = %s, processing_updated_at = %s, batch_id = %s "
         "WHERE id = %s"
     )
     updated = 0
+
+    if logger is not None:
+        logger.info("DB write start: chapter summaries count=%d batch_id=%s", len(summaries), batch_id or "-")
 
     with conn.cursor() as cur:
         for summary in summaries:
@@ -123,6 +136,9 @@ def update_chapter_summaries(
 
             cur.execute(sql, (text, processing_update_ts, batch_id, chapter_id))
             updated += cur.rowcount
+
+    if logger is not None:
+        logger.info("DB write done: chapter summaries rows=%d", updated)
 
     return updated
 
@@ -150,7 +166,7 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
             )
         )
         if not chapter_ids:
-            logger.warning("text_summarizer: No chapters found for test episode.")
+            logger.warning("text_summarizer: no test chapters")
             return
 
     chunks = fetch_chunks(
@@ -163,10 +179,10 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
         logger=logger,
     )
     if not chunks:
-        logger.warning("text_summarizer: No chunks found.")
+        logger.warning("text_summarizer: no chunks")
         return
 
-    logger.debug("Fetched %d chunks for text_summarizer", len(chunks))
+    logger.info("text_summarizer: chunks=%d", len(chunks))
 
     summarizer = TextSummarizer()
     summarizer.logger = logger
@@ -174,35 +190,31 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
     episode_summaries = summarizer.summarize_all_episodes(chunks)
     chapter_summaries = summarizer.summarize_all_chapters(chunks)
 
-    logger.info(
-        "Prepared summaries: episodes=%d chapters=%d dry_run=%s",
-        len(episode_summaries),
-        len(chapter_summaries),
-        args.dry_run,
-    )
+    logger.info("text_summarizer: summaries episodes=%d chapters=%d", len(episode_summaries), len(chapter_summaries))
 
     if args.dry_run or ctx.dry_run:
-        logger.info("Dry run enabled: skipping summary writes and commit")
+        logger.info("text_summarizer: dry run, skip writes")
         return
 
-    logger.info("Starting Update: Episode")
     total_updates = 0
     total_updates += update_episode_summaries(
         conn,
         episode_summaries,
         args.batch_id,
         ctx.processing_update_ts,
+        logger=logger,
     )
-    logger.info("Starting Update: Chapter")
     total_updates += update_chapter_summaries(
         conn,
         chapter_summaries,
         args.batch_id,
         ctx.processing_update_ts,
+        logger=logger,
     )
+    logger.info("DB commit start: text_summarizer rows=%d", total_updates)
     conn.commit()
-    logger.info("Rows updated: %d", total_updates)
-    logger.info("End step: text_summarizer")
+    logger.info("DB commit done: text_summarizer rows=%d", total_updates)
+    logger.info("text_summarizer: done rows=%d", total_updates)
 
 
 def main() -> None:
@@ -217,13 +229,13 @@ def main() -> None:
         log_file=args.log_file,
     ).build()
 
-    with connector.get_connection() as conn:
+    with connector.get_connection(logger=logger) as conn:
         watermark = connector.parse_ts(args.watermark)
         if args.mode == "delta":
             if watermark is None:
-                watermark = connector.get_watermark(conn, args.stage)
-        logger.info("Start watermark: %s", watermark)
-        logger.info("End watermark: %s", args.test_end_watermark)
+                logger.info("watermark: resolve stage=%s", args.stage)
+                watermark = connector.get_watermark(conn, args.stage, logger=logger)
+        logger.info("watermark: mode=%s value=%s", args.mode, watermark)
         ctx = LoadContext(
             mode=args.mode,
             watermark=watermark,

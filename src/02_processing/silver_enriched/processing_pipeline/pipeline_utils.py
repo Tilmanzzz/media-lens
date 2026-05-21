@@ -81,11 +81,11 @@ def _format_delta_debug(
         state = "update_at_gte_watermark"
 
     return (
-        f"step={step} level={level} id={chunk_id} | state={state} | "
-        f"preprocessing_update_at={preprocessing_update_at} | "
-        f"processing_update_at={processing_update_at} | "
-        f"watermark_start_ts={watermark} | watermark_end_ts={end_ts}"
+        f"chunk={chunk_id} step={step} level={level} reason={state} "
+        f"preprocessing_updated_at={preprocessing_update_at} processing_updated_at={processing_update_at} "
+        f"watermark_start={watermark} watermark_end={end_ts}"
     )
+
 
 def _build_fetch_spec(step: str, level: Optional[str]) -> Dict[str, str]:
     if step == "text_summarizer" or step == "fact_checking":
@@ -224,11 +224,25 @@ def fetch_chunks(
         ORDER BY {spec['order_by']}
     """
 
+    if logger is not None:
+        logger.info(
+            "DB fetch start: step=%s level=%s mode=%s ids=%s watermark_start=%s watermark_end=%s",
+            step,
+            level or "-",
+            ctx.mode if ctx is not None else "full",
+            len(ids) if ids is not None else "all",
+            ctx.watermark if ctx is not None else None,
+            end_ts,
+        )
+
     chunks: List[Dict[str, Any]] = []
     with conn.cursor() as cur:
         cur.execute(sql, params)
         rows = cur.fetchall()
         column_names = [column[0] for column in cur.description]
+
+        if logger is not None:
+            logger.info("DB fetch done: step=%s level=%s rows=%d", step, level or "-", len(rows))
 
         for row in rows:
             chunk = dict(zip(column_names, row))
@@ -244,6 +258,7 @@ def fetch_chapter_ids_for_episode(
     conn,
     episode_id: str,
     limit: int,
+    logger: Optional[logging.Logger] = None,
 ) -> List[str]:
     sql = """
         SELECT ch.id
@@ -252,12 +267,19 @@ def fetch_chapter_ids_for_episode(
         ORDER BY ch.chapter_idx
         LIMIT %s
     """
+    if logger is not None:
+        logger.info("DB query start: chapter_ids episode=%s limit=%s", episode_id, limit)
     with conn.cursor() as cur:
         cur.execute(sql, (episode_id, limit))
-        return [str(row[0]) for row in cur.fetchall()]
+        chapter_ids = [str(row[0]) for row in cur.fetchall()]
+    if logger is not None:
+        logger.info("DB query done: chapter_ids episode=%s rows=%d", episode_id, len(chapter_ids))
+    return chapter_ids
 
 
-def start_pipeline_batch(conn, stage: str, load_mode: str) -> str:
+def start_pipeline_batch(conn, stage: str, load_mode: str, logger: Optional[logging.Logger] = None) -> str:
+    if logger is not None:
+        logger.info("DB write start: pipeline_batch stage=%s load_mode=%s", stage, load_mode)
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -269,13 +291,19 @@ def start_pipeline_batch(conn, stage: str, load_mode: str) -> str:
         )
         batch_id = str(cur.fetchone()[0])
     conn.commit()
+    if logger is not None:
+        logger.info("DB write done: pipeline_batch id=%s stage=%s load_mode=%s", batch_id, stage, load_mode)
     return batch_id
 
 
-def finalize_pipeline_batch(conn, batch_id: str, status: str) -> None:
+def finalize_pipeline_batch(conn, batch_id: str, status: str, logger: Optional[logging.Logger] = None) -> None:
+    if logger is not None:
+        logger.info("DB write start: pipeline_batch id=%s status=%s", batch_id, status)
     with conn.cursor() as cur:
         cur.execute(
             "UPDATE pipeline_batches SET status = %s, fin_ts = NOW() WHERE id = %s",
             (status, batch_id),
         )
     conn.commit()
+    if logger is not None:
+        logger.info("DB write done: pipeline_batch id=%s status=%s", batch_id, status)

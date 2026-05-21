@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 import psycopg
 import sys
@@ -21,8 +21,13 @@ class DbConnector:
         if not self.postgres_url:
             raise RuntimeError("POSTGRES_URL is not set")
 
-    def get_connection(self) -> psycopg.Connection:
-        return psycopg.connect(self.postgres_url)
+    def get_connection(self, logger: Optional[Any] = None) -> psycopg.Connection:
+        if logger is not None:
+            logger.info("DB connection start")
+        connection = psycopg.connect(self.postgres_url)
+        if logger is not None:
+            logger.info("DB connection opened")
+        return connection
 
     @staticmethod
     def parse_ts(value: object) -> Optional[datetime]:
@@ -42,17 +47,22 @@ class DbConnector:
                 return None
         return None
 
-    def get_watermark(self, conn: psycopg.Connection, stage: str) -> datetime:
+    def get_watermark(self, conn: psycopg.Connection, stage: str, logger: Optional[Any] = None) -> datetime:
         sql = (
             "SELECT COALESCE(MAX(fin_ts), TIMESTAMPTZ '1970-01-01') "
             "FROM pipeline_batches WHERE stage = %s AND status = 'success'"
         )
+        if logger is not None:
+            logger.info("DB query start: watermark stage=%s", stage)
         with conn.cursor() as cur:
             cur.execute(sql, (stage,))
             row = cur.fetchone()
-        if not row or row[0] is None:
-            return datetime(1970, 1, 1, tzinfo=timezone.utc)
-        return self.parse_ts(row[0]) or datetime(1970, 1, 1, tzinfo=timezone.utc)
+        watermark = datetime(1970, 1, 1, tzinfo=timezone.utc)
+        if row and row[0] is not None:
+            watermark = self.parse_ts(row[0]) or watermark
+        if logger is not None:
+            logger.info("DB query done: watermark stage=%s value=%s", stage, watermark)
+        return watermark
 
 
 if __name__ == "__main__":
