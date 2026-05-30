@@ -3,7 +3,7 @@
 import { useState, useRef, MutableRefObject, ReactNode } from "react";
 import AudioPlayer from "@/components/ui/audio";
 import { TopicCard } from "@/components/ui/cardThemen";
-import { FactCheckCard } from "@/components/ui/factcheck"
+import { FactCheckCard } from "./factcheck";
 import Transcript from "./transcript";
 import type { Chapter } from "@/lib/types";
 
@@ -11,9 +11,19 @@ interface PodcastPlayerProps {
   src: string;
   chapters: Chapter[];
   children?: ReactNode;
+  showTranscript?: boolean;
+  showThemen?: boolean;
+  showFaktencheck?: boolean;
 }
 
-export default function PodcastPlayer({ src, chapters, children }: PodcastPlayerProps) {
+export default function PodcastPlayer({
+  src,
+  chapters,
+  children,
+  showTranscript = true,
+  showThemen = true,
+  showFaktencheck = true,
+}: PodcastPlayerProps) {
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [filteredChapterIndex, setFilteredChapterIndex] = useState<number | null>(null);
   const seekRef = useRef<((time: number) => void) | null>(null);
@@ -30,10 +40,8 @@ export default function PodcastPlayer({ src, chapters, children }: PodcastPlayer
     setFilteredChapterIndex((prev) => (prev === index ? null : index));
   };
 
-  // Alle transcript_lines des aktiven Chapters gesammelt
   const allLines = sorted.flatMap((ch) => ch.transcript_lines ?? []);
 
-  // Fakten: gefiltert nach Chapter oder alle
   const visibleClaims =
     filteredChapterIndex !== null
       ? sorted[filteredChapterIndex]?.fact_checked_claims ?? []
@@ -44,6 +52,7 @@ export default function PodcastPlayer({ src, chapters, children }: PodcastPlayer
 
   return (
     <div className="flex flex-col gap-6 w-full">
+
       {/* 1. AudioPlayer */}
       <AudioPlayer
         src={src}
@@ -51,12 +60,14 @@ export default function PodcastPlayer({ src, chapters, children }: PodcastPlayer
         seekRef={seekRef as MutableRefObject<((time: number) => void) | null>}
       />
 
-      {/* 2. Slot: z.B. EmotionChart */}
+      {/* 2. Slot: EmotionChart o.ä. */}
       {children}
-      <div className="flex-1">
-          {/* Themen + Faktencheck */}
-          <div className="flex flex-row gap-6 items-start">
-            {/* Themen */}
+
+      {/* 3. Themen + Faktencheck nebeneinander */}
+      {(showThemen || showFaktencheck) && (
+        <div className="flex flex-row gap-6 items-start">
+
+          {showThemen && (
             <div className="flex-1">
               <p className="text-sm text-foreground-muted mb-3">Themen</p>
               <div className="flex flex-col gap-3">
@@ -77,8 +88,9 @@ export default function PodcastPlayer({ src, chapters, children }: PodcastPlayer
                 ))}
               </div>
             </div>
+          )}
 
-            {/* Faktencheck */}
+          {showFaktencheck && (
             <div className="flex-1">
               <div className="flex items-center justify-between mb-3">
                 <p className="text-sm text-foreground-muted">
@@ -108,21 +120,23 @@ export default function PodcastPlayer({ src, chapters, children }: PodcastPlayer
                 )}
               </div>
             </div>
-          </div>
-          <div>
-            {/* Transkript */}
-            {allLines.length > 0 && (
-              <div className="flex-1">
-                <p className="text-sm text-foreground-muted mb-3">Transkript</p>
-                <Transcript
-                  lines={allLines}
-                  currentTime={currentTime}
-                  onLineClick={handleSeek}
-                />
-          </div>
-        )}
-          </div>
-      </div>
+          )}
+
+        </div>
+      )}
+
+      {/* 4. Transkript – volle Breite unter Themen/Faktencheck */}
+      {showTranscript && allLines.length > 0 && (
+        <div>
+          <p className="text-sm text-foreground-muted mb-3">Transkript</p>
+          <Transcript
+            lines={allLines}
+            currentTime={currentTime}
+            onLineClick={handleSeek}
+          />
+        </div>
+      )}
+
     </div>
   );
 }

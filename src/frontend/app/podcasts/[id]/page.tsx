@@ -2,12 +2,11 @@ import { foundPodcast } from "@/lib/dummyData";
 import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import EmotionChart from "@/components/ui/chart";
-import PodcastPlayer from "@/components/ui/podcastplayer";
 import type { Chapter } from "@/lib/types";
-import Chat from "@/components/ui/chat";
+import PodcastDetailClient from "@/components/ui/podcastClient";
+import { InfoCard } from "@/components/ui/card";
 
-export default async function PodcastDetail({ params }: { params: { id: string } }) {
+export default async function PodcastDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const episode = foundPodcast.find((p) => p.id === id);
   if (!episode) notFound();
@@ -22,7 +21,6 @@ export default async function PodcastDetail({ params }: { params: { id: string }
     ],
   };
 
-  // Später: const chapters: Chapter[] = await fetch(`/api/episodes/${id}/chapters`).then(r => r.json());
   const chapters: Chapter[] = [
     {
       id: "40000000-0000-0000-0000-000000000007",
@@ -62,12 +60,17 @@ export default async function PodcastDetail({ params }: { params: { id: string }
           claim_idx: 0,
           claim: "97% of scientists agree on climate change.",
           verdict: "MOSTLY_TRUE",
-          explanation: "Die 97% stammen aus einer Metaanalyse von Cook et al. (2013), die über 12.000 Abstracts auswertete. Der Konsens ist real, bezieht sich aber spezifisch auf menschengemachte Erwärmung.",
+          explanation: "Die 97% stammen aus einer Metaanalyse von Cook et al. (2013), die über 12.000 Abstracts auswertete.",
           sources: ["https://iopscience.iop.org/article/10.1088/1748-9326/8/2/024024"],
         },
       ],
     },
   ];
+
+
+  const recommended = foundPodcast
+    .filter((p) => p.id !== id)
+    .slice(0, 3);
 
   return (
     <div className="min-h-screen flex flex-col px-4 py-12">
@@ -75,11 +78,11 @@ export default async function PodcastDetail({ params }: { params: { id: string }
         <Link href={"/"}>Back to Home</Link>
       </div>
 
-      <div className="flex">
+      <div className="flex rounded-xl">
         <div className="w-full max-w-lg self-center rounded-2xl mb-8">
           <Image src={episode.image} alt={episode.titleEpi} width={400} height={400} className="object-cover" />
         </div>
-        <div className="w-full  max-w-1xl flex flex-col mb-8 gap-4">
+        <div className="w-full max-w-1xl flex flex-col mb-8 gap-4">
           <div className="flex gap-2 flex-wrap">
             {badges.map((badge) => (
               <span key={badge} className="px-3 py-1 bg-gray-100 text-gray-800 rounded-full text-sm">
@@ -92,24 +95,32 @@ export default async function PodcastDetail({ params }: { params: { id: string }
           </p>
           <h1 className="text-3xl font-bold">{episode.titleEpi}</h1>
           <p className="text-base leading-relaxed mt-2">{episode.description}</p>
-          <div className="flex gap-20 bottom-0 left-0 text-sm ">
+          <div className="flex gap-20 text-sm">
             <span>{episode.duration}</span>
             <span>{episode.date}</span>
           </div>
         </div>
       </div>
 
-      <div className="flex flex-row gap-6 w-full bg-background-raised mt-6 px-4 py-6">
-        <div className="flex-1">
-          <PodcastPlayer src="/sample-3s.mp3" chapters={chapters}>
-            <EmotionChart data={emotionData} />
-          </PodcastPlayer>
-          <Chat episodeId={episode.id}></Chat>
+      {/* Client-Komponente übernimmt alles Interaktive */}
+      <PodcastDetailClient
+        src="/sample-3s.mp3"
+        episodeId={episode.id}
+        chapters={chapters}
+        emotionData={emotionData}
+      />
+
+      {/* Empfohlene Episoden */}
+      {recommended.length > 0 && (
+        <div className="mt-10">
+          <h2 className="text-lg font-semibold text-foreground mb-4">Das könnte dir auch gefallen</h2>
+          <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+            {recommended.map((item) => (
+              <InfoCard key={item.id} {...item} />
+            ))}
+          </div>
         </div>
-        <div className="w-64 shrink-0">
-          <p>Menü zum Konfigurieren</p>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
