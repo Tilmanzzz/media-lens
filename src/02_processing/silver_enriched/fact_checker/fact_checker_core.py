@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from ddgs import DDGS
+from ddgs.exceptions import DDGSException
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
@@ -258,6 +259,12 @@ class FactChecker:
                             region=self.config.region,
                         )
                         raw_results.extend(list(result_iter))
+                    except DDGSException as exc:
+                        if "No results found" in str(exc):
+                            self.logger.warning("Search returned no results: %s", query)
+                            continue
+                        self.logger.exception("Search failed for query: %s", query)
+                        continue
                     except Exception:
                         self.logger.exception("Search failed for query: %s", query)
                         continue

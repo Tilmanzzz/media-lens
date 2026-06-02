@@ -155,6 +155,10 @@ def main() -> None:
                 finalize_pipeline_batch(conn, batch_id, "success", logger=logger)
             logger.info("pipeline: done batch_id=%s", batch_id or "-")
         except (KeyboardInterrupt, Exception):
+            try:
+                conn.rollback()
+            except Exception:
+                logger.exception("pipeline: rollback failed")
             if not args.dry_run and batch_id is not None:
                 finalize_pipeline_batch(conn, batch_id, "failed", logger=logger)
             logger.exception("pipeline: failed batch_id=%s", batch_id or "-")
