@@ -27,6 +27,10 @@ class TranscriptEmbedder:
     ) -> None:
         if config is None and config_path is not None:
             config = TranscriptEmbedderConfig.from_file(config_path)
+        if config is None:
+            default_path = Path(__file__).resolve().parent / "transcript_embedder_config.json"
+            if default_path.exists():
+                config = TranscriptEmbedderConfig.from_file(default_path)
         self.config = config or TranscriptEmbedderConfig()
         self._setup_logger(logging_enabled=logging_enabled, log_level=log_level)
 

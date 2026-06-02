@@ -197,4 +197,16 @@ USING hnsw (embedding halfvec_cosine_ops);
 CREATE INDEX idx_embeddings_processing_updated_at
 ON embeddings(processing_updated_at);
 
+CREATE UNIQUE INDEX uq_embeddings_podcast
+ON embeddings(podcast_id)
+WHERE level = 'podcast';
+
+CREATE UNIQUE INDEX uq_embeddings_episode
+ON embeddings(episode_id)
+WHERE level = 'episode';
+
+CREATE UNIQUE INDEX uq_embeddings_chapter
+ON embeddings(chapter_id)
+WHERE level = 'chapter';
+
 -- Fact-checked claims are stored in fact_checked_claims.

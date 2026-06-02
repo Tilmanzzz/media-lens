@@ -132,6 +132,7 @@ def main() -> None:
             step_map = {
                 "text_summarizer": base_dir / "01_pipeline_text_summarizer.py",
                 "fact_checker": base_dir / "02_pipeline_fact_checker.py",
+                "embedder": base_dir / "03_pipeline_embedder.py",
             }
 
             if "processing" in steps:
