@@ -132,6 +132,7 @@ def main() -> None:
             step_map = {
                 "text_summarizer": base_dir / "01_pipeline_text_summarizer.py",
                 "fact_checker": base_dir / "02_pipeline_fact_checker.py",
+                "embedder": base_dir / "03_pipeline_embedder.py",
             }
 
             if "processing" in steps:
@@ -154,6 +155,10 @@ def main() -> None:
                 finalize_pipeline_batch(conn, batch_id, "success", logger=logger)
             logger.info("pipeline: done batch_id=%s", batch_id or "-")
         except (KeyboardInterrupt, Exception):
+            try:
+                conn.rollback()
+            except Exception:
+                logger.exception("pipeline: rollback failed")
             if not args.dry_run and batch_id is not None:
                 finalize_pipeline_batch(conn, batch_id, "failed", logger=logger)
             logger.exception("pipeline: failed batch_id=%s", batch_id or "-")

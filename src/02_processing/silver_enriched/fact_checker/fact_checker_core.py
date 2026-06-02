@@ -4,10 +4,12 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from ddgs import DDGS
+from ddgs.exceptions import DDGSException
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
@@ -251,16 +253,48 @@ class FactChecker:
                 raw_results: List[Dict[str, Any]] = []
 
                 for query in queries:
-                    try:
-                        result_iter = ddgs.text(
-                            query,
-                            max_results=self.config.max_search_results_per_query,
-                            region=self.config.region,
-                        )
-                        raw_results.extend(list(result_iter))
-                    except Exception:
-                        self.logger.exception("Search failed for query: %s", query)
-                        continue
+                    max_attempts = 3
+                    for attempt in range(1, max_attempts + 1):
+                        try:
+                            result_iter = ddgs.text(
+                                query,
+                                max_results=self.config.max_search_results_per_query,
+                                region=self.config.region,
+                            )
+                            raw_results.extend(list(result_iter))
+                            break
+                        except DDGSException as exc:
+                            message = str(exc)
+                            if "No results found" in message:
+                                self.logger.warning("Search returned no results: %s", query)
+                                break
+
+                            if attempt >= max_attempts:
+                                self.logger.exception("Search failed after retries: %s", query)
+                                break
+
+                            backoff = 0.5 * (2 ** (attempt - 1))
+                            self.logger.warning(
+                                "Search failed (attempt %d/%d), retry in %.1fs: %s",
+                                attempt,
+                                max_attempts,
+                                backoff,
+                                query,
+                            )
+                            time.sleep(backoff)
+                        except Exception:
+                            if attempt >= max_attempts:
+                                self.logger.exception("Search failed after retries: %s", query)
+                                break
+                            backoff = 0.5 * (2 ** (attempt - 1))
+                            self.logger.warning(
+                                "Search failed (attempt %d/%d), retry in %.1fs: %s",
+                                attempt,
+                                max_attempts,
+                                backoff,
+                                query,
+                            )
+                            time.sleep(backoff)
 
                 research_data[claim] = _compact_sources(raw_results, self.config.max_sources_per_claim)
                 self.logger.debug(

@@ -88,7 +88,7 @@ def _format_delta_debug(
 
 
 def _build_fetch_spec(step: str, level: Optional[str]) -> Dict[str, str]:
-    if step in {"text_summarizer", "fact_checker"}:
+    if step == "text_summarizer":
         return {
             "id_column": "ch.id",
             "select_sql": """
@@ -105,6 +105,28 @@ def _build_fetch_spec(step: str, level: Optional[str]) -> Dict[str, str]:
             "order_by": "e.id, ch.chapter_idx",
             "preprocessing_ts": "ch.preprocessing_updated_at",
             "processing_ts": "ch.processing_updated_at",
+        }
+
+    if step == "fact_checker":
+        return {
+            "id_column": "ch.id",
+            "select_sql": """
+                e.id AS episode_id,
+                ch.id AS chapter_id,
+                ch.transcript AS transcript_text
+                , MAX(fc.processing_updated_at) AS processing_update_ts
+                , ch.preprocessing_updated_at AS preprocessing_update_ts
+            """,
+            "from_sql": """
+                FROM chapter ch
+                JOIN episodes e ON e.id = ch.episode_id
+                LEFT JOIN fact_checked_claims fc ON fc.chapter_id = ch.id
+            """,
+            "group_by": "e.id, ch.id, ch.transcript, ch.preprocessing_updated_at",
+            "order_by": "e.id, ch.chapter_idx",
+            "preprocessing_ts": "ch.preprocessing_updated_at",
+            "processing_ts": "MAX(fc.processing_updated_at)",
+            "processing_ts_is_agg": "true",
         }
 
     if step == "emotion_scoring":
@@ -137,15 +159,20 @@ def _build_fetch_spec(step: str, level: Optional[str]) -> Dict[str, str]:
                 "select_sql": """
                     ch.id AS chapter_id,
                     ch.transcript AS transcript_text
-                    , ch.processing_updated_at AS processing_update_ts
+                    , MAX(em.processing_updated_at) AS processing_update_ts
                     , ch.preprocessing_updated_at AS preprocessing_update_ts
                 """,
                 "from_sql": """
                     FROM chapter ch
+                    LEFT JOIN embeddings em
+                        ON em.chapter_id = ch.id
+                        AND em.level = 'chapter'
                 """,
+                "group_by": "ch.id, ch.transcript, ch.preprocessing_updated_at",
                 "order_by": "ch.episode_id, ch.chapter_idx",
                 "preprocessing_ts": "ch.preprocessing_updated_at",
-                "processing_ts": "ch.processing_updated_at",
+                "processing_ts": "MAX(em.processing_updated_at)",
+                "processing_ts_is_agg": "true",
             }
 
         if level == "episode":
@@ -154,15 +181,20 @@ def _build_fetch_spec(step: str, level: Optional[str]) -> Dict[str, str]:
                 "select_sql": """
                     e.id AS episode_id,
                     e.summary AS episode_summary
-                    , e.processing_updated_at AS processing_update_ts
+                    , MAX(em.processing_updated_at) AS processing_update_ts
                     , e.preprocessing_updated_at AS preprocessing_update_ts
                 """,
                 "from_sql": """
                     FROM episodes e
+                    LEFT JOIN embeddings em
+                        ON em.episode_id = e.id
+                        AND em.level = 'episode'
                 """,
+                "group_by": "e.id, e.summary, e.preprocessing_updated_at",
                 "order_by": "e.id",
                 "preprocessing_ts": "e.preprocessing_updated_at",
-                "processing_ts": "e.processing_updated_at",
+                "processing_ts": "MAX(em.processing_updated_at)",
+                "processing_ts_is_agg": "true",
             }
 
         return {
@@ -170,15 +202,20 @@ def _build_fetch_spec(step: str, level: Optional[str]) -> Dict[str, str]:
             "select_sql": """
                 p.id AS podcast_id,
                 p.title AS podcast_title
-                , p.processing_updated_at AS processing_update_ts
+                , MAX(em.processing_updated_at) AS processing_update_ts
                 , p.preprocessing_updated_at AS preprocessing_update_ts
             """,
             "from_sql": """
                 FROM podcasts p
+                LEFT JOIN embeddings em
+                    ON em.podcast_id = p.id
+                    AND em.level = 'podcast'
             """,
+            "group_by": "p.id, p.title, p.preprocessing_updated_at",
             "order_by": "p.title, p.id",
             "preprocessing_ts": "p.preprocessing_updated_at",
-            "processing_ts": "p.processing_updated_at",
+            "processing_ts": "MAX(em.processing_updated_at)",
+            "processing_ts_is_agg": "true",
         }
 
     raise ValueError(f"Unsupported fetch step: {step}")
@@ -202,12 +239,15 @@ def fetch_chunks(
         where_parts.append(f"{spec['id_column']} = ANY(%s)")
         params.append(list(ids))
 
+    having_parts: List[str] = []
     if ctx is not None and ctx.mode == "delta" and ctx.watermark is not None:
+        processing_is_agg = spec.get("processing_ts_is_agg") == "true"
+        target_parts = having_parts if processing_is_agg else where_parts
         if end_ts is None:
-            where_parts.append(f"({spec['preprocessing_ts']} > %s OR {spec['processing_ts']} IS NULL)")
+            target_parts.append(f"({spec['preprocessing_ts']} > %s OR {spec['processing_ts']} IS NULL)")
             params.append(ctx.watermark)
         else:
-            where_parts.append(
+            target_parts.append(
                 f"(({spec['preprocessing_ts']} > %s AND {spec['preprocessing_ts']} <= %s) OR {spec['processing_ts']} IS NULL)"
             )
             params.extend([ctx.watermark, end_ts])
@@ -216,11 +256,19 @@ def fetch_chunks(
     if where_parts:
         where_clause = "WHERE " + " AND ".join(where_parts)
 
+    group_by = spec.get("group_by")
+    group_clause = f"GROUP BY {group_by}" if group_by else ""
+    having_clause = ""
+    if having_parts:
+        having_clause = "HAVING " + " AND ".join(having_parts)
+
     sql = f"""
         SELECT
         {spec['select_sql']}
         {spec['from_sql']}
         {where_clause}
+        {group_clause}
+        {having_clause}
         ORDER BY {spec['order_by']}
     """
 

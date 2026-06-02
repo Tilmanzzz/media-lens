@@ -91,7 +91,7 @@ CREATE INDEX idx_episodes_source_system_updated_at ON episodes(source_system_upd
 
 
 -- Segments (chapters) per episode; a chapter contains multiple transcript lines.
-CREATE TABLE chapter (
+CREATE TABLE chapters (
   id              UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   episode_id      UUID          NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
   chapter_idx     INT           NOT NULL,
@@ -103,22 +103,22 @@ CREATE TABLE chapter (
   batch_id        UUID          REFERENCES pipeline_batches(id) ON DELETE SET NULL,
   preprocessing_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   processing_updated_at TIMESTAMPTZ,
-  CONSTRAINT uq_chapters_episode_idx UNIQUE (episode_id, chapter_idx),
-  CONSTRAINT ck_chapters_chapter_idx CHECK (chapter_idx >= 0),
+  CONSTRAINT uq_chapters_episode_idx UNIQUE (episode_id, chapters_idx),
+  CONSTRAINT ck_chapters_chapter_idx CHECK (chapters_idx >= 0),
   CONSTRAINT ck_chapters_time_range CHECK (end_time >= start_time),
   CONSTRAINT ck_chapters_start_time CHECK (start_time >= 0),
   CONSTRAINT ck_chapters_end_time CHECK (end_time >= 0)
 );
 
-CREATE INDEX idx_chapters_episode_id ON chapter(episode_id);
-CREATE INDEX idx_chapters_title ON chapter(title);
-CREATE INDEX idx_chapters_preprocessing_updated_at ON chapter(preprocessing_updated_at);
-CREATE INDEX idx_chapters_processing_updated_at ON chapter(processing_updated_at);
+CREATE INDEX idx_chapters_episode_id ON chapters(episode_id);
+CREATE INDEX idx_chapters_title ON chapters(title);
+CREATE INDEX idx_chapters_preprocessing_updated_at ON chapters(preprocessing_updated_at);
+CREATE INDEX idx_chapters_processing_updated_at ON chapters(processing_updated_at);
 
 -- punkt chapteriert
 CREATE TABLE transcript_lines (
   id              UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-  chapter_id      UUID          NOT NULL REFERENCES chapter(id) ON DELETE CASCADE,
+  chapter_id      UUID          NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
   line_idx        INT           NOT NULL,
   start_time      REAL NOT NULL,
   end_time        REAL NOT NULL,
@@ -141,7 +141,7 @@ CREATE INDEX idx_transcript_lines_processing_updated_at ON transcript_lines(proc
 -- Claims per chapter with verdicts and sources.
 CREATE TABLE fact_checked_claims (
   id                UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-  chapter_id        UUID          NOT NULL REFERENCES chapter(id) ON DELETE CASCADE,
+  chapter_id        UUID          NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
   claim_idx         INT,
   claim             TEXT,
   verdict           fact_verdict DEFAULT 'UNVERIFIABLE',
@@ -159,7 +159,7 @@ CREATE INDEX idx_fact_checked_claims_processing_updated_at ON fact_checked_claim
 CREATE TYPE embedding_level AS ENUM ('chapter', 'episode', 'podcast');
 CREATE TABLE embeddings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  chapter_id UUID REFERENCES chapter(id) ON DELETE CASCADE,
+  chapter_id UUID REFERENCES chapters(id) ON DELETE CASCADE,
   episode_id UUID REFERENCES episodes(id) ON DELETE CASCADE,
   podcast_id UUID REFERENCES podcasts(id) ON DELETE CASCADE,
   level embedding_level NOT NULL,
@@ -196,5 +196,17 @@ USING hnsw (embedding halfvec_cosine_ops);
 
 CREATE INDEX idx_embeddings_processing_updated_at
 ON embeddings(processing_updated_at);
+
+CREATE UNIQUE INDEX uq_embeddings_podcast
+ON embeddings(podcast_id)
+WHERE level = 'podcast';
+
+CREATE UNIQUE INDEX uq_embeddings_episode
+ON embeddings(episode_id)
+WHERE level = 'episode';
+
+CREATE UNIQUE INDEX uq_embeddings_chapter
+ON embeddings(chapter_id)
+WHERE level = 'chapter';
 
 -- Fact-checked claims are stored in fact_checked_claims.
