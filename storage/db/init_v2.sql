@@ -4,7 +4,7 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 
 -- Technical batch control for stage-independent execution.
-CREATE TYPE batch_status AS ENUM ('pending', 'success', 'failed');
+CREATE TYPE batch_status AS ENUM ('pending', 'success', 'failed', 'consumed', 'stopped');
 CREATE TYPE pipeline_stage AS ENUM ('ingestion', 'transcription', 'segmenting', 'processing');
 CREATE TYPE load_mode AS ENUM ('full', 'delta');
 CREATE TYPE emotion_label AS ENUM ('happy', 'neutral', 'angry', 'sad');
