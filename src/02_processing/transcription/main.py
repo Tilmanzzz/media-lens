@@ -5,87 +5,179 @@ import asyncio
 import logging
 import signal
 import tempfile
+import asyncpg
+from typing import Tuple
 from minio import Minio
 from faster_whisper import WhisperModel
 
-# Inject parent directory path for clean internal imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
-from internal.python.queue.redis import QueueClient
 from internal.python.db.store import Store
-from internal.python.db.models import TranscriptSegment, Word
 
-# Setup standard structured logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
 )
 logger = logging.getLogger("transcription_worker")
 
 shutdown_event = asyncio.Event()
+internal_task_queue = asyncio.Queue()
 
 
 def handle_exit_signals():
-    logger.info("Received termination signal. Initiating graceful shutdown...")
+    logger.info("Received termination signal. Shutting down...")
     shutdown_event.set()
 
 
-async def process_episode(
-    episode_id: str,
-    store: Store,
-    minio_bronze: Minio,
-    minio_silver: Minio,
-    model: WhisperModel,
+# ==============================================================================
+# INFRASTRUCTURE & SETUP
+# ==============================================================================
+
+
+def init_minio_clients() -> Tuple[Minio, Minio]:
+    minio_endpoint = (
+        os.getenv("MINIO_ENDPOINT", "localhost:9000")
+        .replace("http://", "")
+        .replace("https://", "")
+    )
+    user = os.getenv("MINIO_USER", "minioadmin")
+    password = os.getenv("MINIO_PASS", "minioadmin")
+
+    # Both clients point to the same server, but we return two for logical separation
+    bronze = Minio(minio_endpoint, access_key=user, secret_key=password, secure=False)
+    silver = Minio(minio_endpoint, access_key=user, secret_key=password, secure=False)
+
+    # Ensure required buckets exist before processing begins
+    for bucket_name in ["bronze", "silver"]:
+        if not bronze.bucket_exists(bucket_name):
+            logger.info(f"Creating missing MinIO bucket: '{bucket_name}'")
+            bronze.make_bucket(bucket_name)
+
+    return bronze, silver
+
+
+def init_whisper_model() -> WhisperModel:
+    device = "cuda" if os.getenv("USE_CUDA", "false").lower() == "true" else "cpu"
+    compute_type = "float16" if device == "cuda" else "int8"
+
+    logger.info(f"Loading Whisper large-v3 ({device})")
+    return WhisperModel("large-v3", device=device, compute_type=compute_type)
+
+
+async def postgres_listener_task(pg_url: str):
+    """Listens for Postgres NOTIFY events with a heartbeat and auto-reconnect loop."""
+    while not shutdown_event.is_set():
+        conn = None
+        try:
+            conn = await asyncpg.connect(pg_url)
+
+            def display_notification(connection, pid, channel, payload):
+                try:
+                    event_data = json.loads(payload)
+                    if batch_id := event_data.get("batch_id"):
+                        internal_task_queue.put_nowait(batch_id)
+                except Exception as e:
+                    logger.error(f"Failed parsing notification: {e}")
+
+            await conn.add_listener("transcription_ready", display_notification)
+            logger.info("Listening on 'transcription_ready'")
+
+            # Heartbeat loop prevents silent Docker NAT network drops
+            while not shutdown_event.is_set():
+                await asyncio.sleep(30)
+                await conn.execute("SELECT 1")  # Keep-alive ping
+
+        except Exception as e:
+            if not shutdown_event.is_set():
+                logger.warning(
+                    f"Database listener connection lost: {e}. Reconnecting in 5s..."
+                )
+                await asyncio.sleep(5)
+        finally:
+            if conn:
+                try:
+                    await conn.close()
+                except Exception:
+                    pass
+
+
+async def queue_backlog_batches(store: Store):
+    try:
+        missed_batches = await store.pool.fetch(
+            """
+            SELECT id FROM pipeline_batches 
+            WHERE stage = 'ingestion' AND status = 'success'
+            ORDER BY start_ts ASC;
+            """
+        )
+        for row in missed_batches:
+            internal_task_queue.put_nowait(str(row["id"]))
+
+        if missed_batches:
+            logger.info(f"Queued {len(missed_batches)} backlog batches.")
+    except Exception as e:
+        logger.error(f"Failed to fetch backlog: {e}")
+
+
+# ==============================================================================
+# DATA PROCESSING
+# ==============================================================================
+
+
+def download_audio(minio_client: Minio, audio_key: str, target_file) -> None:
+    logger.info(f"Downloading {audio_key}")
+    response = minio_client.get_object("bronze", audio_key)
+    try:
+        for chunk in response.stream(32 * 1024):
+            target_file.write(chunk)
+        target_file.flush()
+    finally:
+        response.close()
+        response.release_conn()
+
+
+def upload_transcript(
+    minio_client: Minio, transcript_key: str, raw_output: dict
 ) -> None:
-    """Core audio transcription data processing pipeline."""
-    # 1. Fetch metadata from Postgres
+    raw_json_bytes = json.dumps(raw_output).encode("utf-8")
+
+    with tempfile.NamedTemporaryFile(delete=True) as tmp_json:
+        tmp_json.write(raw_json_bytes)
+        tmp_json.flush()
+        tmp_json.seek(0)
+
+        logger.info(f"Uploading raw transcript to {transcript_key}")
+        minio_client.put_object(
+            bucket_name="silver",
+            object_name=transcript_key,
+            data=tmp_json,
+            length=len(raw_json_bytes),
+            content_type="application/json",
+        )
+
+
+async def process_episode(
+    episode_id: str, store: Store, bronze: Minio, silver: Minio, model: WhisperModel
+) -> None:
     ep = await store.get_episode_by_id(episode_id)
     if not ep:
-        raise ValueError(f"Episode metadata not found in database for ID: {episode_id}")
+        raise ValueError(f"Episode not found: {episode_id}")
 
-    # 2. Download raw audio from bronze MinIO bucket to a secure temp file
     with tempfile.NamedTemporaryFile(suffix=".mp3", delete=True) as tmp_file:
-        logger.info(f"Downloading audio from bronze: {ep.audio_key}")
-        response = minio_bronze.get_object("bronze", ep.audio_key)
-        try:
-            for chunk in response.stream(32 * 1024):
-                tmp_file.write(chunk)
-            tmp_file.flush()
-        finally:
-            response.close()
-            response.release_conn()
+        download_audio(bronze, ep.audio_key, tmp_file)
 
-        # 3. Compute Native Speech-to-Text via faster-whisper
-        logger.info(f"Starting compute engine for: {ep.title}")
-        segments, _ = model.transcribe(
-            tmp_file.name, word_timestamps=True, vad_filter=True
+        logger.info(f"Transcribing {ep.title}")
+
+        # Offloaded to a background thread to prevent asyncio starvation
+        whisper_segments, _ = await asyncio.to_thread(
+            model.transcribe, tmp_file.name, word_timestamps=True, vad_filter=True
         )
 
         raw_output = {"text": "", "segments": []}
-        parsed_segments: list[TranscriptSegment] = []
         full_text_accumulator = []
 
-        for segment in segments:
-            words_list = []
-            if segment.words:
-                for w in segment.words:
-                    words_list.append(
-                        Word(
-                            word=w.word.strip(),
-                            start=w.start,
-                            end=w.end,
-                            probability=w.probability,
-                        )
-                    )
-
-            parsed_seg = TranscriptSegment(
-                start=segment.start,
-                end=segment.end,
-                text=segment.text.strip(),
-                words=words_list if words_list else None,
-            )
-            parsed_segments.append(parsed_seg)
+        # Stream raw Whisper output directly into a structured dictionary
+        for segment in whisper_segments:
             full_text_accumulator.append(segment.text)
-
             raw_output["segments"].append(
                 {
                     "start": segment.start,
@@ -105,33 +197,63 @@ async def process_episode(
 
         raw_output["text"] = "".join(full_text_accumulator).strip()
 
-    # 4. Export immutable raw JSON asset to MinIO silver bucket
     transcript_key = f"{ep.audio_key}.json"
-    raw_json_bytes = json.dumps(raw_output).encode("utf-8")
+    upload_transcript(silver, transcript_key, raw_output)
 
-    with tempfile.NamedTemporaryFile(delete=True) as tmp_json:
-        tmp_json.write(raw_json_bytes)
-        tmp_json.flush()
-        tmp_json.seek(0)
-
-        logger.info(
-            f"Uploading raw transcript tracking asset to silver: {transcript_key}"
-        )
-        minio_silver.put_object(
-            bucket_name="silver",
-            object_name=transcript_key,
-            data=tmp_json,
-            length=len(raw_json_bytes),
-            content_type="application/json",
-        )
-
-    # 5. Persist structural data points into PostgreSQL
-    logger.info(
-        f"Persisting {len(parsed_segments)} transcript segments into operational database."
-    )
-    await store.insert_transcript_segments(ep.id, parsed_segments)
+    logger.info(f"Updating database reference for {transcript_key}")
     await store.set_transcript_key(ep.id, transcript_key)
-    await store.mark_pending_sectioning(ep.id)
+
+
+# ==============================================================================
+# WORKLOAD ORCHESTRATION
+# ==============================================================================
+
+
+async def claim_and_process_batch(
+    ingestion_batch_id: str,
+    store: Store,
+    bronze: Minio,
+    silver: Minio,
+    model: WhisperModel,
+):
+    logger.info(f"Processing workload from Ingestion Batch: {ingestion_batch_id}")
+
+    transcription_batch_id = await store.create_pipeline_batch("transcription", "full")
+
+    # Atomically claims episodes and marks the ingestion batch as 'consumed'.
+    episode_ids = await store.claim_batch_episodes(
+        ingestion_batch_id, transcription_batch_id
+    )
+
+    if not episode_ids:
+        logger.info(
+            f"Workload {ingestion_batch_id} claimed or empty. Discarding batch."
+        )
+        await store.pool.execute(
+            "DELETE FROM pipeline_batches WHERE id = $1", transcription_batch_id
+        )
+        return
+
+    logger.info(
+        f"Claimed {len(episode_ids)} episodes for Transcription Batch: {transcription_batch_id}"
+    )
+
+    for episode_id in episode_ids:
+        try:
+            await process_episode(episode_id, store, bronze, silver, model)
+        except Exception as e:
+            logger.error(f"Failed processing episode {episode_id}: {e}")
+
+    await store.complete_pipeline_batch(
+        batch_id=transcription_batch_id,
+        status="success",
+        notify_channel="segmenting_ready",
+    )
+
+
+# ==============================================================================
+# ENTRYPOINT
+# ==============================================================================
 
 
 async def main():
@@ -139,100 +261,42 @@ async def main():
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, handle_exit_signals)
 
-    # Initialize external shared connections ONCE
-    q = QueueClient(os.getenv("REDIS_ADDR", "localhost:6379"))
-    store = Store(os.getenv("POSTGRES_URL", ""))
-
-    await q.initialize()
+    pg_url = os.getenv("POSTGRES_URL", "postgresql://user:pass@localhost:5432/db")
+    store = Store(pg_url)
     await store.connect()
 
-    # Configure MinIO Object Layer Abstractions
-    minio_endpoint = (
-        os.getenv("MINIO_ENDPOINT", "localhost:9000")
-        .replace("http://", "")
-        .replace("https://", "")
-    )
-    minio_user = os.getenv("MINIO_USER", "minioadmin")
-    minio_pass = os.getenv("MINIO_PASS", "minioadmin")
+    minio_bronze, minio_silver = init_minio_clients()
+    model = init_whisper_model()
 
-    minio_bronze = Minio(
-        minio_endpoint, access_key=minio_user, secret_key=minio_pass, secure=False
-    )
-    minio_silver = Minio(
-        minio_endpoint, access_key=minio_user, secret_key=minio_pass, secure=False
-    )
+    listener_task = asyncio.create_task(postgres_listener_task(pg_url))
+    await queue_backlog_batches(store)
 
-    # Contextual check to safely select execution device bounds
-    device = "cuda" if os.getenv("USE_CUDA", "false").lower() == "true" else "cpu"
-    compute_type = "float16" if device == "cuda" else "int8"
-
-    logger.info(
-        f"Loading faster-whisper engine using [{device}] with compute type [{compute_type}]..."
-    )
-    model = WhisperModel("large-v3", device=device, compute_type=compute_type)
-
-    consumer_id = os.getenv("HOSTNAME", "fallback-worker")
-    logger.info(f"Transcription worker running. Identification tag: [{consumer_id}]")
+    logger.info("Worker ready.")
 
     while not shutdown_event.is_set():
         try:
-            # Priority Step A: Claim stale unacknowledged pending tasks hanging in PEL
-            message_id, episode_id = await q.claim_stale_transcription(consumer_id)
-
-            # Priority Step B: If PEL is clear, block-wait for a fresh task
-            if not message_id:
-                message_id, episode_id = await q.dequeue_transcription(consumer_id)
-
-            if not message_id:
-                # No data returned during loop block window
-                await asyncio.sleep(0.1)
-                continue
-
-            if message_id and not episode_id:
-                logger.error(
-                    f"Payload Error: Message ID {message_id} pulled from stream, but field 'episode_id' "
-                    "is missing or empty. Acknowledging message to prevent poison pill loop."
+            try:
+                ingestion_batch_id = await asyncio.wait_for(
+                    internal_task_queue.get(), timeout=1.0
                 )
-                await q.ack_transcription(message_id)
+            except asyncio.TimeoutError:
                 continue
 
-            logger.info(
-                f"Task acquired. Processing Episode ID: {episode_id} (Message ID: {message_id})"
+            await claim_and_process_batch(
+                ingestion_batch_id, store, minio_bronze, minio_silver, model
             )
-
-            # Execute processing pipeline
-            await process_episode(episode_id, store, minio_bronze, minio_silver, model)
-
-            # Advance to next stream and acknowledge current completion
-            await q.enqueue_sectioning(episode_id)
-            await q.ack_transcription(message_id)
-            logger.info(f"Successfully processed and acknowledged task: {message_id}")
+            internal_task_queue.task_done()
 
         except asyncio.CancelledError:
             break
         except Exception as e:
-            logger.error(
-                f"Execution error occurred inside core task processing cycle: {e}",
-                exc_info=True,
-            )
-
-            # Recovery attempt for missing consumer group configurations
-            if "NOGROUP" in str(e):
-                logger.info(
-                    "Detected missing consumer group. Attempting to recover state..."
-                )
-                try:
-                    await q.initialize()
-                except Exception as recovery_err:
-                    logger.error(f"State recovery failed: {recovery_err}")
-
+            logger.error(f"Error during batch processing: {e}", exc_info=True)
             await asyncio.sleep(2)
 
-    # Resource Cleanup Phase
-    logger.info("Cleaning resources up...")
-    await q.close()
+    logger.info("Cleaning up...")
+    listener_task.cancel()
     await store.close()
-    logger.info("Worker gracefully stopped.")
+    logger.info("Worker stopped.")
 
 
 if __name__ == "__main__":

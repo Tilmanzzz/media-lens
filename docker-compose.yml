@@ -118,7 +118,33 @@ services:
       - MINIO_PASS=${MINIO_PASS}
       - POSTGRES_URL=${POSTGRES_URL}
       - REDIS_ADDR=${REDIS_ADDR}
-      - USE_CUDA=false  
+      - USE_CUDA=true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  sectioning:
+    build:
+      context: ./src
+      dockerfile: ./02_processing/sectioning/Dockerfile
+    depends_on:
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - POSTGRES_URL=${POSTGRES_URL}
+      - SECTION_DURATION_SECONDS=${SECTION_DURATION_SECONDS:-300}
+
   processing_silver:
     build: ./src/02_processing/silver/
     depends_on:

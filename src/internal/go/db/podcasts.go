@@ -44,6 +44,22 @@ func (s *Store) CompletePipelineBatch(ctx context.Context, batchID string, statu
 	return nil
 }
 
+// StopPreviousBatchIfNeeded setzt den vorherigen Batch einer Episode auf 'stopped',
+// falls dieser sich in einem unfertigen Zustand befindet.
+func (s *Store) StopPreviousBatchIfNeeded(ctx context.Context, batchID string) error {
+	query := `
+		UPDATE pipeline_batches
+		SET status = 'stopped'
+		WHERE id = $1
+		  AND NOT (
+		      (stage = 'processing' AND status = 'success')
+		      OR status IN ('failed', 'stopped', 'consumed')
+		  )`
+
+	_, err := s.Pool.Exec(ctx, query, batchID)
+	return err
+}
+
 func (s *Store) InsertPodcast(
 	ctx context.Context,
 	guid string,
@@ -74,7 +90,7 @@ func (s *Store) InsertPodcast(
 		)
 		VALUES (
 			$1, $2, $3, $4, $5,
-			$6, $7, $8, $9, $10, $11
+			$6, $7, $8, $9, $10
 		)
 		ON CONFLICT (feed_url) DO NOTHING
 		`,

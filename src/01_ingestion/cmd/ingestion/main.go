@@ -118,7 +118,9 @@ func main() {
 			isChanged := false
 
 			existingEp, exists := existingEps[item.GUID]
-			if !exists {
+			if loadMode == "full" {
+				isChanged = true
+			} else if !exists {
 				isChanged = true
 			} else {
 				if existingEp.EnclosureURL != enclosureURL {
@@ -130,9 +132,16 @@ func main() {
 					}
 				}
 			}
-
 			if !isChanged {
 				continue
+			}
+			// Batch-Check: Verhindert Konflikte bei noch laufenden Batches
+			if exists && existingEp.BatchID != "" {
+				err := store.StopPreviousBatchIfNeeded(ctx, existingEp.BatchID)
+				if err != nil {
+					log.Printf("Warning: Failed to verify/stop previous batch %s for episode %s: %v", existingEp.BatchID, item.GUID, err)
+					// Der Prozess wird hier nicht abgebrochen, nur geloggt.
+				}
 			}
 
 			// Stream media instantly to MinIO to keep memory low

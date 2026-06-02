@@ -1,99 +1,110 @@
 import logging
 import json
-from typing import List
-from psycopg_pool import AsyncConnectionPool
-from psycopg.rows import class_row
+import asyncpg
 
-from .models import Episode, TranscriptSegment
+from .models import Episode
 
 logger = logging.getLogger(__name__)
 
 
 class Store:
     def __init__(self, conn_str: str):
-        """Initializes the async connection pool."""
-        self.pool = AsyncConnectionPool(conninfo=conn_str, min_size=2, max_size=10)
         self.conn_str = conn_str
+        self.pool: asyncpg.Pool = None
 
     async def connect(self):
-        """Explicitly opens the connection pool."""
         try:
-            await self.pool.open()
-            logger.info("Successfully established PostgreSQL connection pool.")
+            self.pool = await asyncpg.create_pool(
+                dsn=self.conn_str, min_size=2, max_size=10
+            )
+            logger.info("Successfully established asyncpg PostgreSQL connection pool.")
         except Exception as e:
-            logger.error(f"Failed to connect to PostgreSQL: {e}")
+            logger.error(f"Failed to connect to PostgreSQL via asyncpg: {e}")
             raise e
 
     async def close(self):
-        """Gracefully close the connection pool."""
-        await self.pool.close()
+        if self.pool:
+            await self.pool.close()
 
     async def get_episode_by_id(self, episode_id: str) -> Episode:
-        """Fetches a single episode by its primary key (UUID)."""
         query = """
-            SELECT id, podcast_id, guid, title, audio_key, status, published_at, enclosure_url 
-            FROM episodes WHERE id = %s
+            SELECT id, podcast_id, guid, title, audio_key, published_at, enclosure_url 
+            FROM episodes WHERE id = $1
         """
-        async with self.pool.connection() as conn:
-            # class_row acts exactly like pgxscan, mapping the row to the Pydantic model
-            async with conn.cursor(row_factory=class_row(Episode)) as cur:
-                await cur.execute(query, (episode_id,))
-                ep = await cur.fetchone()
-                if not ep:
-                    raise Exception(f"Episode {episode_id} not found")
-                return ep
+        row = await self.pool.fetchrow(query, episode_id)
+        if not row:
+            raise Exception(f"Episode {episode_id} not found")
 
-    async def mark_pending_sectioning(self, episode_id: str) -> None:
-        """Updates the episode status to pending_sectioning."""
-        query = "UPDATE episodes SET status = 'pending_sectioning' WHERE id = %s"
-        async with self.pool.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(query, (episode_id,))
-                if cur.rowcount == 0:
-                    raise Exception(f"No episode found with id: {episode_id}")
-            # Python requires explicit commits for updates/inserts
-            await conn.commit()
-
-    async def mark_pending_transcription(self, episode_id: str) -> None:
-        """Updates the episode status to pending_transcription."""
-        query = "UPDATE episodes SET status = 'pending_transcription' WHERE id = %s"
-        async with self.pool.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(query, (episode_id,))
-                if cur.rowcount == 0:
-                    raise Exception(f"No episode found with id: {episode_id}")
-            await conn.commit()
+        return Episode(**row)
 
     async def set_transcript_key(self, episode_id: str, transcript_key: str) -> None:
-        """Sets the transcript_key for an episode."""
-        query = "UPDATE episodes SET transcript_key = %s WHERE id = %s"
-        async with self.pool.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(query, (transcript_key, episode_id))
-                if cur.rowcount == 0:
-                    raise Exception(f"No episode found with id: {episode_id}")
-            await conn.commit()
+        query = "UPDATE episodes SET transcript_key = $1 WHERE id = $2"
+        status = await self.pool.execute(query, transcript_key, episode_id)
 
-    async def insert_transcript_segments(
-        self, episode_id: str, segments: List[TranscriptSegment]
-    ) -> None:
-        """Bulk inserts transcript segments into the database efficiently."""
+        if status == "UPDATE 0":
+            raise Exception(f"No episode found with id: {episode_id}")
+
+    async def create_pipeline_batch(self, stage: str, mode: str) -> str:
         query = """
-            INSERT INTO transcript_segments (episode_id, start_time, end_time, text, words)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO pipeline_batches (stage, load_mode, status, start_ts, fin_ts)
+            VALUES ($1::pipeline_stage, $2::load_mode, 'pending'::batch_status, NOW(), NOW())
+            RETURNING id
         """
+        batch_id = await self.pool.fetchval(query, stage, mode)
+        return str(batch_id)
 
-        # Prepare parameters as a list of tuples
-        params = []
-        for seg in segments:
-            # Dump the list of Word Pydantic models into a JSON string for the JSONB column
-            words_json = (
-                json.dumps([w.model_dump() for w in seg.words]) if seg.words else None
+    async def complete_pipeline_batch(
+        self, batch_id: str, status: str, notify_channel: str = None
+    ) -> None:
+        query = """
+            UPDATE pipeline_batches
+            SET status = $1::batch_status, fin_ts = NOW()
+            WHERE id = $2
+        """
+        status_tag = await self.pool.execute(query, status, batch_id)
+        if status_tag == "UPDATE 0":
+            raise Exception(
+                f"Failed to update pipeline batch status: batch_id {batch_id} not found"
             )
-            params.append((episode_id, seg.start, seg.end, seg.text, words_json))
 
-        async with self.pool.connection() as conn:
-            async with conn.cursor() as cur:
-                # executemany automatically pipelines the inserts
-                await cur.executemany(query, params)
-            await conn.commit()
+        if status == "success" and notify_channel:
+            payload = json.dumps({"batch_id": batch_id})
+            await self.pool.execute("SELECT pg_notify($1, $2)", notify_channel, payload)
+            logger.info(f"Broadcasted '{notify_channel}' event for batch: {batch_id}")
+
+    async def claim_batch_episodes(
+        self,
+        source_batch_id: str,
+        new_batch_id: str,
+    ) -> list[str] | None:
+        """
+        Atomically re-points all episodes from source_batch to new_batch and
+        marks source_batch as 'consumed'.
+
+        The two writes share a transaction so there is no observable state where
+        episodes have moved but the source batch is still 'success' (or vice versa).
+        Returns the claimed episode IDs; an empty list means another worker won the
+        race and the new batch should be discarded.
+        """
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                rows = await conn.fetch(
+                    """
+                    UPDATE episodes
+                    SET batch_id = $1
+                    WHERE batch_id = $2
+                    RETURNING id
+                    """,
+                    new_batch_id,
+                    source_batch_id,
+                )
+                if rows:
+                    await conn.execute(
+                        """
+                        UPDATE pipeline_batches
+                        SET status = 'consumed'::batch_status
+                        WHERE id = $1
+                        """,
+                        source_batch_id,
+                    )
+                return [str(row["id"]) for row in rows]

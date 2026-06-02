@@ -27,7 +27,7 @@ func main() {
 	var rssURL string
 
 	if len(os.Args) < 2 {
-		rssURL = "https://feeds.acast.com/public/shows/93574422-e184-439d-9318-7e9ce0fb0a25"
+		rssURL = "https://feeds.acast.com/public/shows/183d2cc4-50d2-420f-a306-40dae4a0bfa7"
 	} else {
 		rssURL = os.Args[1]
 	}
