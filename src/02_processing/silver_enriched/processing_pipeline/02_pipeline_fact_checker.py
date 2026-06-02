@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -12,10 +12,10 @@ if str(SRC_DIR) not in sys.path:
 
 from common.app_logger import AppLogger
 from common.db_connector import DbConnector
+from silver_enriched.fact_checker.fact_checker_core import FactChecker
 from silver_enriched.processing_pipeline.pipeline_utils import (
     LoadContext, build_pipeline_logger, fetch_chapter_ids_for_episode,
     fetch_chunks, load_json_config)
-from silver_enriched.text_summarizer.text_summarizer_core import TextSummarizer
 
 
 def parse_args() -> argparse.Namespace:
@@ -23,9 +23,7 @@ def parse_args() -> argparse.Namespace:
     pre_parser.add_argument("--config", default=None, help="Path to pipeline args JSON config")
     pre_args, remaining = pre_parser.parse_known_args()
 
-    parser = argparse.ArgumentParser(
-        description="Run text_summarizer against database sources (full or delta)."
-    )
+    parser = argparse.ArgumentParser(description="Run fact_checker against chapter transcripts (full or delta).")
     parser.add_argument("--config", default="processing_pipeline_config.json", help="Path to pipeline args JSON config")
     parser.add_argument("--mode", choices=["full", "delta"], default="delta")
     parser.add_argument("--stage", default="processing", help="pipeline_batches.stage for watermark lookup")
@@ -53,7 +51,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--log-level", default="INFO", help="Pipeline logger level")
     parser.add_argument("--log-dir", default=None, help="Optional pipeline log directory")
-    parser.add_argument("--log-file", default="text_summarizer_pipeline.log", help="Pipeline log file name")
+    parser.add_argument("--log-file", default="fact_checker_pipeline.log", help="Pipeline log file name")
 
     config = load_json_config(pre_args.config or parser.get_default("config"), base_dir=Path(__file__).resolve().parent)
     if config:
@@ -61,91 +59,96 @@ def parse_args() -> argparse.Namespace:
 
     return parser.parse_args(remaining)
 
-def update_episode_summaries(
+
+def _normalize_sources(sources: Any) -> List[str]:
+    if not isinstance(sources, list):
+        return []
+
+    normalized: List[str] = []
+    for source in sources:
+        value = str(source).strip()
+        if value:
+            normalized.append(value)
+    return normalized
+
+
+def upsert_fact_checked_claims(
     conn,
-    summaries: Iterable[Dict[str, Any]],
+    chapter_results: Iterable[Dict[str, Any]],
     batch_id: Optional[str],
     processing_update_ts: Optional[datetime],
     logger=None,
 ) -> int:
-
     if processing_update_ts is None:
         raise ValueError("processing_update_ts is required for processing writes")
 
-    summaries = list(summaries)
-    sql = (
-        "UPDATE episodes SET summary = %s, processing_updated_at = %s, batch_id = %s "
-        "WHERE id = %s"
-    )
-
-    params: List[tuple] = []
-
-    if logger is not None:
-        logger.info("DB write start: episode summaries count=%d batch_id=%s", len(summaries), batch_id or "-")
-
-    for summary in summaries:
-        episode_id = summary.get("episode_id")
-        text = summary.get("summary")
-
-        if not episode_id or text is None:
+    rows: List[tuple] = []
+    for chapter_result in chapter_results:
+        chapter_id = chapter_result.get("chapter_id")
+        claims = chapter_result.get("claims") or []
+        if not chapter_id or not isinstance(claims, list):
             continue
 
-        params.append((text, processing_update_ts, batch_id, episode_id))
+        for claim_idx, claim_data in enumerate(claims):
+            if not isinstance(claim_data, dict):
+                continue
 
-    with conn.cursor() as cur:
-        if params:
-            cur.executemany(sql, params)
-        updated = len(params)
+            claim_text = claim_data.get("claim")
+            if not claim_text:
+                continue
+
+            rows.append(
+                (
+                    chapter_id,
+                    claim_idx,
+                    str(claim_text).strip(),
+                    str(claim_data.get("verdict") or "UNVERIFIABLE").strip().upper(),
+                    str(claim_data.get("explanation") or "").strip(),
+                    _normalize_sources(claim_data.get("sources")),
+                    batch_id,
+                    processing_update_ts,
+                )
+            )
 
     if logger is not None:
-        logger.info("DB write done: episode summaries rows=%d", updated)
+        logger.info("DB write start: fact_checked_claims count=%d batch_id=%s", len(rows), batch_id or "-")
+
+    sql = """
+        INSERT INTO fact_checked_claims (
+            chapter_id,
+            claim_idx,
+            claim,
+            verdict,
+            explanation,
+            sources,
+            batch_id,
+            processing_updated_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (chapter_id, claim_idx)
+        DO UPDATE SET
+            claim = EXCLUDED.claim,
+            verdict = EXCLUDED.verdict,
+            explanation = EXCLUDED.explanation,
+            sources = EXCLUDED.sources,
+            batch_id = EXCLUDED.batch_id,
+            processing_updated_at = EXCLUDED.processing_updated_at
+    """
+
+    with conn.cursor() as cur:
+        if rows:
+            cur.executemany(sql, rows)
+        updated = len(rows)
+
+    if logger is not None:
+        logger.info("DB write done: fact_checked_claims rows=%d", updated)
 
     return updated
 
-
-def update_chapter_summaries(
-    conn,
-    summaries: Iterable[Dict[str, Any]],
-    batch_id: Optional[str],
-    processing_update_ts: Optional[datetime],
-    logger=None,
-) -> int:
-
-    if processing_update_ts is None:
-        raise ValueError("processing_update_ts is required for processing writes")
-
-    summaries = list(summaries)
-    sql = (
-        "UPDATE chapter SET summary = %s, processing_updated_at = %s, batch_id = %s "
-        "WHERE id = %s"
-    )
-    params: List[tuple] = []
-
-    if logger is not None:
-        logger.info("DB write start: chapter summaries count=%d batch_id=%s", len(summaries), batch_id or "-")
-
-    for summary in summaries:
-        chapter_id = summary.get("chapter_id")
-        text = summary.get("summary")
-
-        if not chapter_id or text is None:
-            continue
-
-        params.append((text, processing_update_ts, batch_id, chapter_id))
-
-    with conn.cursor() as cur:
-        if params:
-            cur.executemany(sql, params)
-        updated = len(params)
-
-    if logger is not None:
-        logger.info("DB write done: chapter summaries rows=%d", updated)
-
-    return updated
 
 def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
     logger = ctx.logger or build_pipeline_logger(
-        module_name="text_summarizer_pipeline",
+        module_name="fact_checker_pipeline",
         enabled=args.log_enabled,
         level=args.log_level,
         log_dir=args.log_dir,
@@ -167,12 +170,12 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
             )
         )
         if not chapter_ids:
-            logger.warning("text_summarizer: no test chapters")
+            logger.warning("fact_checker: no test chapters")
             return
 
     chunks = fetch_chunks(
         conn,
-        step="text_summarizer",
+        step="fact_checker",
         level="chapter",
         ids=chapter_ids,
         ctx=ctx,
@@ -180,42 +183,51 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
         logger=logger,
     )
     if not chunks:
-        logger.warning("text_summarizer: no chunks")
+        logger.warning("fact_checker: no chunks")
         return
 
-    logger.info("text_summarizer: chunks=%d", len(chunks))
+    logger.info("fact_checker: chunks=%d", len(chunks))
 
-    summarizer = TextSummarizer()
-    summarizer.logger = logger
+    checker = FactChecker(logging_enabled=args.log_enabled, log_level=args.log_level)
+    checker.logger = logger
 
-    episode_summaries = summarizer.summarize_all_episodes(chunks)
-    chapter_summaries = summarizer.summarize_all_chapters(chunks)
+    chapter_results: List[Dict[str, Any]] = []
+    for chunk in chunks:
+        transcript = str(chunk.get("transcript_text") or "").strip()
+        chapter_id = chunk.get("chapter_id")
+        if not chapter_id or not transcript:
+            continue
 
-    logger.info("text_summarizer: summaries episodes=%d chapters=%d", len(episode_summaries), len(chapter_summaries))
+        logger.info("fact_checker: start chapter_id=%s", chapter_id)
+        result = checker.fact_check(transcript)
+        claims = result.get("claims") if isinstance(result, dict) else []
+        if not isinstance(claims, list):
+            claims = []
+        chapter_results.append({"chapter_id": chapter_id, "claims": claims})
+        logger.info("fact_checker: done chapter_id=%s claims=%d", chapter_id, len(claims))
+
+    if not chapter_results:
+        logger.warning("fact_checker: no claims")
+        return
+
+    total_claims = sum(len(item.get("claims") or []) for item in chapter_results)
+    logger.info("fact_checker: chapter_results=%d claims=%d", len(chapter_results), total_claims)
 
     if args.dry_run or ctx.dry_run:
-        logger.info("text_summarizer: dry run, skip writes")
+        logger.info("fact_checker: dry run, skip writes")
         return
 
-    total_updates = 0
-    total_updates += update_episode_summaries(
+    total_updates = upsert_fact_checked_claims(
         conn,
-        episode_summaries,
+        chapter_results,
         args.batch_id,
         ctx.processing_update_ts,
         logger=logger,
     )
-    total_updates += update_chapter_summaries(
-        conn,
-        chapter_summaries,
-        args.batch_id,
-        ctx.processing_update_ts,
-        logger=logger,
-    )
-    logger.info("DB commit start: text_summarizer rows=%d", total_updates)
+    logger.info("DB commit start: fact_checker rows=%d", total_updates)
     conn.commit()
-    logger.info("DB commit done: text_summarizer rows=%d", total_updates)
-    logger.info("text_summarizer: done rows=%d", total_updates)
+    logger.info("DB commit done: fact_checker rows=%d", total_updates)
+    logger.info("fact_checker: done rows=%d", total_updates)
 
 
 def main() -> None:
@@ -223,7 +235,7 @@ def main() -> None:
     connector = DbConnector()
 
     logger = AppLogger(
-        module_name="text_summarizer_pipeline",
+        module_name="fact_checker_pipeline",
         enabled=args.log_enabled,
         level=args.log_level,
         log_dir=args.log_dir,
@@ -241,6 +253,7 @@ def main() -> None:
             mode=args.mode,
             watermark=watermark,
             connector=connector,
+            processing_update_ts=datetime.now(timezone.utc),
             logger=logger,
             dry_run=args.dry_run,
         )

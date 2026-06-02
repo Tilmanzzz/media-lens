@@ -1,5 +1,6 @@
 {
-  "model": "gemma3:4b",
+  "provider": "gemini",
+  "model": "gemini-2.5-flash",
   "temperature": 0.0,
   "default_transcript_path": "test/fact_checker_test_transcript.txt",
   "default_output_path": "test/output_factchecker.json",

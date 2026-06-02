@@ -88,7 +88,7 @@ def _format_delta_debug(
 
 
 def _build_fetch_spec(step: str, level: Optional[str]) -> Dict[str, str]:
-    if step == "text_summarizer" or step == "fact_checking":
+    if step in {"text_summarizer", "fact_checker"}:
         return {
             "id_column": "ch.id",
             "select_sql": """

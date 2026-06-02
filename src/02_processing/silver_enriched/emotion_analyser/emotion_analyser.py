@@ -16,8 +16,9 @@ if str(SRC_DIR) not in sys.path:
 
 
 from common.app_logger import AppLogger
-from emotion_config import EmotionConfig
-from emotion_label_catalog import EmotionLabelCatalog
+
+from .emotion_config import EmotionConfig
+from .emotion_label_catalog import EmotionLabelCatalog
 
 
 class EmotionAnalyser:

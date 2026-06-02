@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
-import sys
 from typing import Optional
 
 SRC_DIR = str(Path(__file__).resolve()).split("src")[0] + "src\\02_processing"
@@ -13,12 +13,8 @@ if str(SRC_DIR) not in sys.path:
 
 from common.db_connector import DbConnector
 from silver_enriched.processing_pipeline.pipeline_utils import (
-    LoadContext,
-    build_pipeline_logger,
-    finalize_pipeline_batch,
-    load_json_config,
-    start_pipeline_batch,
-)
+    LoadContext, build_pipeline_logger, finalize_pipeline_batch,
+    load_json_config, start_pipeline_batch)
 
 
 def parse_args() -> argparse.Namespace:
@@ -80,7 +76,7 @@ def load_step_module(step_path: Path):
 
 def main() -> None:
     args = parse_args()
-    steps = {step.strip() for step in args.steps.split(",") if step.strip()}
+    steps = [step.strip() for step in args.steps.split(",") if step.strip()]
 
     logger = build_pipeline_logger(
         module_name="processing_pipeline_runner",
@@ -128,15 +124,18 @@ def main() -> None:
                 logger=logger,
                 dry_run=args.dry_run,
             )
-            logger.info("watermark: mode=%s value=%s", args.mode, watermark)
+            logger.info("watermark: mode=%s watermark start=%s", args.mode, watermark)
+            if args.testing and args.test_end_watermark:
+                logger.info("watermark test_end=%s", args.test_end_watermark)
 
             base_dir = Path(__file__).resolve().parent
             step_map = {
                 "text_summarizer": base_dir / "01_pipeline_text_summarizer.py",
+                "fact_checker": base_dir / "02_pipeline_fact_checker.py",
             }
 
             if "processing" in steps:
-                steps = set(step_map.keys())
+                steps = list(step_map.keys())
 
             for step in steps:
                 step_path = step_map.get(step)

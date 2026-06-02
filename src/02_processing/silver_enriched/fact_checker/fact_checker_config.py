@@ -16,7 +16,8 @@ DEFAULT_ALLOWED_VERDICTS = [
 
 @dataclass(slots=True)
 class FactCheckerConfig:
-    model: str = "gemma3:4b"
+    provider: str = "gemini"
+    model: str = "gemini-3.5-flash"
     temperature: float = 0.0
     default_transcript_path: str = "test/fact_checker_test_transcript.txt"
     default_output_path: str = "test/output_factchecker.json"
@@ -52,6 +53,7 @@ class FactCheckerConfig:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "provider": self.provider,
             "model": self.model,
             "temperature": self.temperature,
             "default_transcript_path": self.default_transcript_path,
