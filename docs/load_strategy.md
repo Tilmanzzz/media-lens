@@ -62,7 +62,7 @@ SELECT * FROM transcript_lines;
 
 ### Delta load
 
-Use `system_updated_at` because these rows are produced by your processing.
+Use `processing_updated_at` because these rows are produced/updated during processing.
 
 ```sql
 SELECT *
@@ -89,7 +89,7 @@ SELECT * FROM segment_embeddings;
 
 ### Delta load
 
-Use `system_updated_at` because these rows are produced by your enrichment.
+Use `processing_updated_at` because these rows are produced/updated during processing/enrichment.
 
 ```sql
 SELECT *

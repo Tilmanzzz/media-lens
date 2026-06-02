@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from ddgs import DDGS
+from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
 
@@ -13,8 +16,11 @@ SRC_DIR = str(Path(__file__).resolve()).split("src")[0] + "src/02_processing"
 if str(SRC_DIR) not in sys.path:
     sys.path.append(str(SRC_DIR))
 
+load_dotenv(Path(__file__).resolve().parents[3] / ".env")
+
 from common.app_logger import AppLogger
-from fact_checker_config import FactCheckerConfig
+
+from .fact_checker_config import FactCheckerConfig
 
 
 def _strip_code_fences(text: str) -> str:
@@ -26,6 +32,17 @@ def _parse_json(text: str, fallback: Any) -> Any:
         return json.loads(_strip_code_fences(text))
     except Exception:
         return fallback
+
+
+def _response_to_text(response: Any) -> str:
+    raw = getattr(response, "content", None) or getattr(response, "text", None) or ""
+    if isinstance(raw, list):
+        raw = " ".join(
+            item.get("text", "")
+            for item in raw
+            if isinstance(item, dict) and item.get("type") == "text"
+        )
+    return re.sub(r"```(?:json)?\s*|\s*```", "", str(raw)).strip()
 
 
 def _dedupe_preserve_order(items: Iterable[str]) -> List[str]:
@@ -76,13 +93,42 @@ class FactChecker:
             config = FactCheckerConfig.from_file(config_path)
         self.config = config or FactCheckerConfig()
         self._setup_logger(logging_enabled=logging_enabled, log_level=log_level)
-
-        self.llm = ChatOllama(
-            model=self.config.model,
-            temperature=self.config.temperature,
-            **self.config.llm_options,
+        self.llm = self._build_llm()
+        self.logger.debug(
+            "Initialized FactChecker with provider=%s model=%s region=%s",
+            self.config.provider,
+            self.config.model,
+            self.config.region,
         )
-        self.logger.debug("Initialized FactChecker with model=%s, region=%s", self.config.model, self.config.region)
+
+    def _build_llm(self):
+        provider = (self.config.provider or "gemini").strip().lower()
+        if provider == "ollama":
+            return ChatOllama(
+                model=self.config.model,
+                temperature=self.config.temperature,
+                **self.config.llm_options,
+            )
+
+        if provider == "gemini":
+            try:
+                from langchain_google_genai import \
+                    ChatGoogleGenerativeAI  # type: ignore[import-not-found]
+            except ImportError as exc:
+                raise ImportError("Missing dependency: langchain-google-genai") from exc
+
+            api_key = os.getenv("GEMINI_API_KEY")
+            if not api_key:
+                raise ValueError("GEMINI_API_KEY is not set in the environment")
+
+            return ChatGoogleGenerativeAI(
+                model=self.config.model,
+                temperature=self.config.temperature,
+                google_api_key=api_key,
+                **self.config.llm_options,
+            )
+
+        raise ValueError(f"Unsupported LLM provider: {self.config.provider}")
 
     def _setup_logger(self, logging_enabled: Optional[bool], log_level: Optional[str]) -> None:
         enabled = self.config.logging_enabled if logging_enabled is None else logging_enabled
@@ -125,26 +171,36 @@ class FactChecker:
 
         Rules:
         1. Extract only verifiable, real-world factual claims.
-        2. Ignore fictional stories, opinions, jokes, speculation, rhetorical questions and personal preferences.
-        3. Return ONLY a JSON list of claim strings.
+        2. Ignore pure opinions, jokes, speculation, rhetorical questions and personal preferences.
+        IMPORTANT: A claim does NOT become an opinion just because it is stated in a conversation.
+        "Studies show X" or "X is the scientific consensus" are factual claims, not opinions.
+        3. Return ONLY a JSON list of claim strings. No markdown.
         4. If no factual claims exist, return [].
         """.strip()
 
         prompt = f"""
         Extract factual claims from this transcript.
+        Examples of claims to extract:
+        - References to specific studies, journals, or publications
+        - Statements about scientific consensus or research findings  
+        - Quantitative comparisons or performance statements
+        - Named sources with dates
 
         Transcript:
         {transcript}
+        
+        Return ONLY a raw JSON array of strings.
+        No markdown, no code fences, no explanation.
+        Example output: ["Claim one.", "Claim two."]
         """.strip()
+        
+        response = self.llm.invoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=prompt),
+        ])
 
-        response = self.llm.invoke(
-            [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=prompt),
-            ]
-        )
-
-        claims = _parse_json(getattr(response, "content", ""), [])
+        # Ollama/gemma returns a string, Gemini returns a list of dicts.
+        claims = _parse_json(_response_to_text(response), [])
         if not isinstance(claims, list):
             self.logger.warning("Claim extraction response was not a JSON list")
             return []
@@ -164,6 +220,9 @@ class FactChecker:
 
         Claim:
         {claim}
+        
+        Return ONLY a JSON list of strings.
+        Example output: ["Query one", "Query two"]
         """.strip()
 
         response = self.llm.invoke(
@@ -173,7 +232,7 @@ class FactChecker:
             ]
         )
 
-        queries = _parse_json(getattr(response, "content", ""), [])
+        queries = _parse_json(_response_to_text(response), [])
         if not isinstance(queries, list):
             return [claim]
 
@@ -260,7 +319,7 @@ class FactChecker:
                 ]
             )
 
-            parsed = _parse_json(getattr(response, "content", ""), {})
+            parsed = _parse_json(_response_to_text(response), {})
             if not isinstance(parsed, dict):
                 self.logger.warning("Verifier response was not a JSON object for claim: %s", claim)
             verdicts.append(self._normalize_verdict(claim, parsed, sources))

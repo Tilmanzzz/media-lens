@@ -13,7 +13,8 @@ if str(SRC_DIR) not in sys.path:
     sys.path.append(str(SRC_DIR))
 
 from common.app_logger import AppLogger
-from transcript_embedder_config import TranscriptEmbedderConfig
+
+from .transcript_embedder_config import TranscriptEmbedderConfig
 
 
 class TranscriptEmbedder:

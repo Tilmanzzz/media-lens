@@ -8,7 +8,8 @@ from typing import Any, Dict
 
 @dataclass(slots=True)
 class TextSummarizerConfig:
-    model: str = "gemma3:4b"
+    provider: str = "gemini"
+    model: str = "gemini-2.5-flash"
     temperature: float = 0.0
     default_input_path: str = "text_summarizer_test_input.json"
     default_output_path: str = "output_text_summarizer.json"
@@ -22,7 +23,6 @@ class TextSummarizerConfig:
     @classmethod
     def from_file(cls, config_path: str | Path) -> "TextSummarizerConfig":
         raw_path = Path(config_path).expanduser()
-
         if raw_path.is_absolute():
             candidate_paths = [raw_path]
         else:
@@ -41,6 +41,7 @@ class TextSummarizerConfig:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "provider": self.provider,
             "model": self.model,
             "temperature": self.temperature,
             "default_input_path": self.default_input_path,

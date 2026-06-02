@@ -9,7 +9,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./storage/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./storage/db/init_v2.sql:/docker-entrypoint-initdb.d/init_v2.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -57,7 +57,7 @@ services:
       start_period: 10s
 
   ingestion:
-    build: 
+    build:
       context: ./src
       dockerfile: ./01_ingestion/Dockerfile
       target: ingestion
@@ -67,7 +67,7 @@ services:
       postgres:
         condition: service_healthy
     env_file:
-      - .env    
+      - .env
     environment:
       - MINIO_ENDPOINT=${MINIO_ENDPOINT}
       - MINIO_USER=${MINIO_USER}
@@ -76,7 +76,7 @@ services:
       - REDIS_ADDR=${REDIS_ADDR}
 
   insertion:
-    build: 
+    build:
       context: ./src/
       dockerfile: ./01_ingestion/Dockerfile
       target: insertion
@@ -84,16 +84,16 @@ services:
       minio:
         condition: service_healthy
     env_file:
-      - .env    
+      - .env
     profiles: ["tools"]
     environment:
       - MINIO_ENDPOINT=${MINIO_ENDPOINT}
       - MINIO_USER=${MINIO_USER}
       - MINIO_PASS=${MINIO_PASS}
       - POSTGRES_URL=${POSTGRES_URL}
-      - REDIS_ADDR=${REDIS_ADDR}   
+      - REDIS_ADDR=${REDIS_ADDR}
   transcription:
-    build: 
+    build:
       context: ./src/
       dockerfile: ./02_processing/transcription/Dockerfile
     depends_on:
