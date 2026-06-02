@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from dotenv import load_dotenv
 from langchain_core.prompts import PromptTemplate
 from langchain_ollama import ChatOllama
 
@@ -12,7 +15,10 @@ SRC_DIR = str(Path(__file__).resolve()).split("src")[0] + "src/02_processing"
 if str(SRC_DIR) not in sys.path:
     sys.path.append(str(SRC_DIR))
 
+load_dotenv(Path(__file__).resolve().parents[3] / ".env")
+
 from common.app_logger import AppLogger
+
 from .text_summarizer_config import TextSummarizerConfig
 
 
@@ -33,11 +39,7 @@ class TextSummarizer:
 
         self._setup_logger(logging_enabled=logging_enabled, log_level=log_level)
 
-        self.llm = ChatOllama(
-            model=self.config.model,
-            temperature=self.config.temperature,
-            **self.config.llm_options,
-        )
+        self.llm = self._build_llm()
 
         self.episode_prompt = PromptTemplate.from_template(
             """
@@ -76,6 +78,35 @@ Return ONLY the summary, no explanations or commentary.
         self.chapter_chain = self.chapter_prompt | self.llm
 
         self.logger.debug("Initialized TextSummarizer with model=%s", self.config.model)
+
+    def _build_llm(self):
+        provider = (self.config.provider or "gemini").strip().lower()
+        if provider == "ollama":
+            return ChatOllama(
+                model=self.config.model,
+                temperature=self.config.temperature,
+                **self.config.llm_options,
+            )
+
+        if provider == "gemini":
+            try:
+                from langchain_google_genai import \
+                    ChatGoogleGenerativeAI  # type: ignore[import-not-found]
+            except ImportError as exc:
+                raise ImportError("Missing dependency: langchain-google-genai") from exc
+
+            api_key = os.getenv("GEMINI_API_KEY")
+            if not api_key:
+                raise ValueError("GEMINI_API_KEY is not set in the environment")
+
+            return ChatGoogleGenerativeAI(
+                model=self.config.model,
+                temperature=self.config.temperature,
+                google_api_key=api_key,
+                **self.config.llm_options,
+            )
+
+        raise ValueError(f"Unsupported LLM provider: {self.config.provider}")
 
     def _setup_logger(self, logging_enabled: Optional[bool], log_level: Optional[str]) -> None:
         enabled = self.config.logging_enabled if logging_enabled is None else logging_enabled
@@ -119,10 +150,14 @@ Return ONLY the summary, no explanations or commentary.
 
     @staticmethod
     def _extract_content(response: Any) -> str:
-        content = getattr(response, "content", response)
-        if isinstance(content, str):
-            return content.strip()
-        return str(content).strip()
+        raw = getattr(response, "content", None) or getattr(response, "text", None) or response
+        if isinstance(raw, list):
+            raw = " ".join(
+                item.get("text", "")
+                for item in raw
+                if isinstance(item, dict) and item.get("type") == "text"
+            )
+        return re.sub(r"```(?:json)?\s*|\s*```", "", str(raw)).strip()
 
     def summarize_episode_chunks(self, episode_chunks: List[Dict[str, Any]]) -> str:
         ordered = self._sort_episode_chunks(episode_chunks)

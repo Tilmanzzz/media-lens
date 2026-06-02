@@ -5,7 +5,7 @@
   "batch_id": null,
   "dry_run": false,
   "steps": "text_summarizer,fact_checker",
-  "testing": false,
+  "testing": true,
   "test_episode_id": null,
   "test_chapter_limit": null,
   "test_end_watermark": "2026-05-17T12:00:00+00:00",
