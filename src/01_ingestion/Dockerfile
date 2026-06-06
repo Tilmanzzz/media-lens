@@ -5,7 +5,8 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY . .
+COPY 01_ingestion/ ./01_ingestion/
+COPY internal/ ./internal/
 
 RUN CGO_ENABLED=0 GOOS=linux go build -o ingestion 01_ingestion/cmd/ingestion/main.go
 

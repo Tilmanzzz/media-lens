@@ -31,6 +31,8 @@ func main() {
 			"https://feeds.megaphone.fm/ADL5417720568",
 			"https://rss.buzzsprout.com/1032730.rss",
 			"https://feeds.captivate.fm/thebest5minutewine/",
+			"https://feeds.transistor.fm/5-minute-morning-show",
+			"https://feed.podbean.com/themicropodcast/feed.xml",
 		}
 	} else {
 		// Take all command-line arguments as URLs

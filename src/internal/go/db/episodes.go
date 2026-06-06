@@ -11,7 +11,7 @@ import (
 // pre-fetches all episodes for a podcast into a fast lookup map
 func (s *Store) GetEpisodeMap(ctx context.Context, podcastID string) (map[string]Episode, error) {
 	var episodes []Episode
-	query := `SELECT id, podcast_id, guid, title, audio_key, published_at, enclosure_url, COALESCE(batch_id::text, '') as batch_id
+	query := `SELECT id, podcast_id, guid, title, audio_key, cover_key, published_at, enclosure_url, COALESCE(batch_id::text, '') as batch_id
 	          FROM episodes WHERE podcast_id = $1`
 
 	err := pgxscan.Select(ctx, s.Pool, &episodes, query, podcastID)
@@ -29,7 +29,7 @@ func (s *Store) GetEpisodeMap(ctx context.Context, podcastID string) (map[string
 // fetches a single episode by its primary key (UUID).
 func (s *Store) GetEpisodeByID(ctx context.Context, id string) (Episode, error) {
 	var ep Episode
-	query := `SELECT id, podcast_id, guid, title, audio_key, status, published_at, enclosure_url 
+	query := `SELECT id, podcast_id, guid, title, audio_key, cover_key, status, published_at, enclosure_url 
 	          FROM episodes WHERE id = $1`
 
 	// fetches single row
@@ -95,14 +95,17 @@ func (s *Store) SetTranscriptKey(ctx context.Context, id string, transcriptKey s
 }
 
 func (s *Store) UpsertEpisode(ctx context.Context, ep Episode) (string, error) {
-	query := `INSERT INTO episodes (podcast_id, guid, title, audio_key, published_at, enclosure_url, batch_id) 
-	          VALUES ($1, $2, $3, $4, $5, $6, $7) 
+	query := `INSERT INTO episodes (podcast_id, guid, title, audio_key, cover_key, published_at, enclosure_url, batch_id) 
+	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
 	          ON CONFLICT (podcast_id, guid) DO UPDATE SET 
 	          	title = EXCLUDED.title,
 	          	audio_key = EXCLUDED.audio_key,
+	          	cover_key = EXCLUDED.cover_key,
 	          	published_at = EXCLUDED.published_at,
 	          	enclosure_url = EXCLUDED.enclosure_url,
-	          	batch_id = EXCLUDED.batch_id
+	          	batch_id = EXCLUDED.batch_id,
+	          	ingested_at = NOW(),
+	          	ingestion_updated_at = NOW()
 		RETURNING id`
 
 	var id string
@@ -113,6 +116,7 @@ func (s *Store) UpsertEpisode(ctx context.Context, ep Episode) (string, error) {
 		ep.GUID,
 		ep.Title,
 		ep.AudioKey,
+		ep.CoverKey,
 		ep.PublishedAt,
 		ep.EnclosureURL,
 		ep.BatchID,
@@ -135,6 +139,7 @@ func (s *Store) BulkUpsertEpisodes(ctx context.Context, eps []Episode) ([]string
 	guids := make([]string, len(eps))
 	titles := make([]string, len(eps))
 	audioKeys := make([]string, len(eps))
+	coverKeys := make([]string, len(eps))
 	publishedAts := make([]*time.Time, len(eps))
 	enclosureURLs := make([]string, len(eps))
 	batchIDs := make([]string, len(eps))
@@ -144,6 +149,7 @@ func (s *Store) BulkUpsertEpisodes(ctx context.Context, eps []Episode) ([]string
 		guids[i] = ep.GUID
 		titles[i] = ep.Title
 		audioKeys[i] = ep.AudioKey
+		coverKeys[i] = ep.CoverKey
 		publishedAts[i] = ep.PublishedAt
 		enclosureURLs[i] = ep.EnclosureURL
 		batchIDs[i] = ep.BatchID
@@ -151,22 +157,26 @@ func (s *Store) BulkUpsertEpisodes(ctx context.Context, eps []Episode) ([]string
 
 	// 2. Stream all values inside a single unnest matrix expression
 	query := `
-		INSERT INTO episodes (podcast_id, guid, title, audio_key, published_at, enclosure_url, batch_id) 
+		INSERT INTO episodes (podcast_id, guid, title, audio_key, cover_key, published_at, enclosure_url, batch_id) 
 		SELECT * FROM unnest(
 			$1::uuid[], 
 			$2::text[], 
 			$3::text[], 
 			$4::text[], 
-			$5::timestamptz[], 
-			$6::text[], 
-			$7::uuid[]
+			$5::text[], 
+			$6::timestamptz[], 
+			$7::text[], 
+			$8::uuid[]
 		)
 		ON CONFLICT (podcast_id, guid) DO UPDATE SET 
 			title = EXCLUDED.title,
 			audio_key = EXCLUDED.audio_key,
+			cover_key = EXCLUDED.cover_key,
 			published_at = EXCLUDED.published_at,
 			enclosure_url = EXCLUDED.enclosure_url,
-			batch_id = EXCLUDED.batch_id
+			batch_id = EXCLUDED.batch_id,
+			ingested_at = NOW(),
+			ingestion_updated_at = NOW()
 		RETURNING id`
 
 	// 3. Collect the returning database UUIDs back into a simple string array via scany
@@ -176,6 +186,7 @@ func (s *Store) BulkUpsertEpisodes(ctx context.Context, eps []Episode) ([]string
 		guids,
 		titles,
 		audioKeys,
+		coverKeys,
 		publishedAts,
 		enclosureURLs,
 		batchIDs,

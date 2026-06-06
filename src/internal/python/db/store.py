@@ -28,8 +28,12 @@ class Store:
 
     async def get_episode_by_id(self, episode_id: str) -> Episode:
         query = """
-            SELECT id, podcast_id, guid, title, audio_key, published_at, enclosure_url 
-            FROM episodes WHERE id = $1
+        SELECT 
+            id, podcast_id, guid, title, published_at, duration_seconds, 
+            audio_key, xml_key, transcript_key, cover_key, enclosure_url, summary, batch_id,
+            ingested_at, source_system_updated_at, ingestion_updated_at 
+        FROM episodes 
+        WHERE id = $1
         """
         row = await self.pool.fetchrow(query, episode_id)
         if not row:
@@ -108,3 +112,31 @@ class Store:
                         source_batch_id,
                     )
                 return [str(row["id"]) for row in rows]
+
+    async def set_processing_updated_at(self, episode_id: str) -> None:
+        query = "UPDATE episodes SET processing_updated_at = NOW() WHERE id = $1"
+        status = await self.pool.execute(query, episode_id)
+
+        if status == "UPDATE 0":
+            raise Exception(f"No episode found with id: {episode_id}")
+
+    async def set_preprocessing_updated_at(self, episode_id: str) -> None:
+        query = "UPDATE episodes SET preprocessing_updated_at = NOW() WHERE id = $1"
+        status = await self.pool.execute(query, episode_id)
+
+        if status == "UPDATE 0":
+            raise Exception(f"No episode found with id: {episode_id}")
+
+    async def set_ingestion_updated_at(self, episode_id: str) -> None:
+        query = "UPDATE episodes SET ingestion_updated_at = NOW() WHERE id = $1"
+        status = await self.pool.execute(query, episode_id)
+
+        if status == "UPDATE 0":
+            raise Exception(f"No episode found with id: {episode_id}")
+
+    async def set_podcast_preprocessing_updated_at(self, podcast_id: str) -> None:
+        query = "UPDATE podcasts SET preprocessing_updated_at = NOW() WHERE id = $1"
+        status = await self.pool.execute(query, podcast_id)
+
+        if status == "UPDATE 0":
+            raise Exception(f"No podcast found with id: {podcast_id}")

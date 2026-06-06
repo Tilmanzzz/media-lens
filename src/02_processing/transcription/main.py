@@ -1,4 +1,5 @@
 import os
+import io
 import sys
 import json
 import asyncio
@@ -60,7 +61,9 @@ def init_whisper_model() -> WhisperModel:
     compute_type = "float16" if device == "cuda" else "int8"
 
     logger.info(f"Loading Whisper large-v3 ({device})")
-    return WhisperModel("large-v3", device=device, compute_type=compute_type)
+    # available models:
+    # # tiny, tiny.en, base, base.en, small, small.en, medium, medium.en, large-v1, large-v2, large-v3, large-v3-turbo, turbo, distil-small.en, distil-medium.en, distil-large-v2, distil-large-v3, distil-large-v3.5
+    return WhisperModel("tiny", device=device, compute_type=compute_type)
 
 
 async def postgres_listener_task(pg_url: str):
@@ -139,20 +142,16 @@ def upload_transcript(
     minio_client: Minio, transcript_key: str, raw_output: dict
 ) -> None:
     raw_json_bytes = json.dumps(raw_output).encode("utf-8")
+    data_stream = io.BytesIO(raw_json_bytes)
 
-    with tempfile.NamedTemporaryFile(delete=True) as tmp_json:
-        tmp_json.write(raw_json_bytes)
-        tmp_json.flush()
-        tmp_json.seek(0)
-
-        logger.info(f"Uploading raw transcript to {transcript_key}")
-        minio_client.put_object(
-            bucket_name="silver",
-            object_name=transcript_key,
-            data=tmp_json,
-            length=len(raw_json_bytes),
-            content_type="application/json",
-        )
+    logger.info(f"Uploading raw transcript to {transcript_key}")
+    minio_client.put_object(
+        bucket_name="silver",
+        object_name=transcript_key,
+        data=data_stream,
+        length=len(raw_json_bytes),
+        content_type="application/json",
+    )
 
 
 async def process_episode(
@@ -167,15 +166,22 @@ async def process_episode(
 
         logger.info(f"Transcribing {ep.title}")
 
-        # Offloaded to a background thread to prevent asyncio starvation
-        whisper_segments, _ = await asyncio.to_thread(
+        # Capture the 'info' object instead of ignoring it with '_'
+        whisper_segments, info = await asyncio.to_thread(
             model.transcribe, tmp_file.name, word_timestamps=True, vad_filter=True
         )
 
-        raw_output = {"text": "", "segments": []}
+        raw_output = {
+            "metadata": {
+                "language": info.language,
+                "language_probability": info.language_probability,
+                "duration": info.duration,
+            },
+            "text": "",
+            "segments": [],
+        }
         full_text_accumulator = []
 
-        # Stream raw Whisper output directly into a structured dictionary
         for segment in whisper_segments:
             full_text_accumulator.append(segment.text)
             raw_output["segments"].append(
@@ -197,7 +203,10 @@ async def process_episode(
 
         raw_output["text"] = "".join(full_text_accumulator).strip()
 
-    transcript_key = f"{ep.audio_key}.json"
+    # Create a clean transcript path (e.g., audio/pid/guid/transcript.json)
+    base_dir = os.path.dirname(ep.audio_key)
+    transcript_key = f"{base_dir}/transcript.json"
+
     upload_transcript(silver, transcript_key, raw_output)
 
     logger.info(f"Updating database reference for {transcript_key}")

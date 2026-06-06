@@ -6,10 +6,10 @@ import logging
 import signal
 import asyncpg
 import torch
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from minio import Minio
 from nltk.tokenize import TextTilingTokenizer
-from transformers import PegasusForConditionalGeneration, PegasusTokenizer, pipeline
+from transformers import pipeline
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
@@ -23,12 +23,9 @@ logger = logging.getLogger("segmenting_worker")
 shutdown_event = asyncio.Event()
 internal_task_queue: asyncio.Queue[str] = asyncio.Queue()
 
-# Global variables for local NLP pipelines
-pegasus_model = None
-pegasus_tokenizer = None
-classifier_pipeline = None  # Pre-defined candidate labels for the zero-shot classifier to enforce one-word descriptive titles
+classifier_pipeline = None
+
 CANDIDATE_TOPICS = [
-    # --- Geopolitics, Defense & Nations ---
     "Geopolitics",
     "Diplomacy",
     "Defense",
@@ -49,7 +46,6 @@ CANDIDATE_TOPICS = [
     "Sovereignty",
     "Borders",
     "Sanctions",
-    # --- Technology & Digital Infrastructure ---
     "Technology",
     "Software",
     "Hardware",
@@ -68,7 +64,6 @@ CANDIDATE_TOPICS = [
     "Programming",
     "Biotech",
     "Telecom",
-    # --- Economics, Finance & Business ---
     "Business",
     "Economy",
     "Finance",
@@ -87,7 +82,6 @@ CANDIDATE_TOPICS = [
     "Marketing",
     "Labor",
     "Logistics",
-    # --- Politics, Law & Governance ---
     "Politics",
     "Elections",
     "Government",
@@ -100,7 +94,6 @@ CANDIDATE_TOPICS = [
     "Democracy",
     "Activism",
     "Protest",
-    # --- Science, Nature & Environment ---
     "Science",
     "Physics",
     "Chemistry",
@@ -117,7 +110,6 @@ CANDIDATE_TOPICS = [
     "Nuclear",
     "Wildlife",
     "Oceans",
-    # --- History & Society ---
     "History",
     "Antiquity",
     "War",
@@ -134,7 +126,6 @@ CANDIDATE_TOPICS = [
     "Documentary",
     "Biography",
     "TrueCrime",
-    # --- Health, Medicine & Fitness ---
     "Health",
     "Medicine",
     "Fitness",
@@ -147,7 +138,6 @@ CANDIDATE_TOPICS = [
     "Wellness",
     "Biohacking",
     "Longevity",
-    # --- Culture, Arts & Media ---
     "Arts",
     "Literature",
     "Books",
@@ -165,7 +155,6 @@ CANDIDATE_TOPICS = [
     "Language",
     "Linguistics",
     "Journalism",
-    # --- Lifestyle, Leisure & Community ---
     "Leisure",
     "Hobbies",
     "Sports",
@@ -184,7 +173,6 @@ CANDIDATE_TOPICS = [
     "Animals",
     "Education",
     "Careers",
-    # --- Religion, Beliefs & Alternative ---
     "Religion",
     "Spirituality",
     "Theology",
@@ -197,7 +185,6 @@ CANDIDATE_TOPICS = [
     "Esotericism",
     "Occult",
     "Astrology",
-    # --- Catch-All & Meta ---
     "General",
     "Interview",
     "News",
@@ -227,26 +214,12 @@ def init_minio_client() -> Minio:
     )
 
 
-# ==============================================================================
-# LOCAL NLP MODELS PIPELINE (PEGASUS SETUP)
-# ==============================================================================
-
-
 def init_local_nlp_models():
-    """Initializes PEGASUS abstraction engine and zero-shot classifier on GPU/CPU."""
-    global pegasus_model, pegasus_tokenizer, classifier_pipeline
+    global classifier_pipeline
     device_idx = 0 if torch.cuda.is_available() else -1
     device_str = "cuda" if device_idx == 0 else "cpu"
     logger.info(f"Initializing local NLP pipelines on device: {device_str.upper()}")
 
-    # Load explicit Pegasus model & tokenizer pairs
-    model_name = "google/pegasus-cnn_dailymail"  # Alternative: "google/pegasus-xsum" for shorter summaries
-    pegasus_tokenizer = PegasusTokenizer.from_pretrained(model_name)
-    pegasus_model = PegasusForConditionalGeneration.from_pretrained(model_name).to(
-        device_str
-    )
-
-    # Zero-shot Classifier for exact one-word category filtering (~500 MB)
     classifier_pipeline = pipeline(
         "zero-shot-classification",
         model="MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli",
@@ -325,34 +298,9 @@ def section_transcript_by_topic(
     return sections
 
 
-def process_metadata_locally(text: str) -> tuple[str, str]:
-    """Runs local inference using explicit Tokenizer layers to avoid prompt bleed."""
-    global pegasus_model, pegasus_tokenizer, classifier_pipeline
-    device_str = "cuda" if torch.cuda.is_available() else "cpu"
+def process_metadata_locally(text: str) -> str:
+    global classifier_pipeline
 
-    try:
-        # Explicit input tokenization with safety clipping down to Pegasus context limits (1024 tokens)
-        inputs = pegasus_tokenizer(
-            text, max_length=1024, truncation=True, return_tensors="pt"
-        ).to(device_str)
-
-        # Abstractive execution
-        summary_ids = pegasus_model.generate(
-            inputs["input_ids"],
-            max_length=80,
-            min_length=25,
-            num_beams=4,
-            length_penalty=2.0,
-            early_stopping=True,
-        )
-
-        # Decode only target generated values
-        summary = pegasus_tokenizer.decode(summary_ids[0], skip_special_tokens=True)
-    except Exception as e:
-        logger.error(f"Local PEGASUS summarization failed: {e}")
-        summary = "Summary generation failed."
-
-    # Assign exact One-Word Class Label via Zero-Shot Layer
     try:
         classifier_out = classifier_pipeline(
             text[:4000], candidate_labels=CANDIDATE_TOPICS, multi_label=False
@@ -362,7 +310,7 @@ def process_metadata_locally(text: str) -> tuple[str, str]:
         logger.error(f"Local zero-shot classification failed: {e}")
         title = "General"
 
-    return title, summary
+    return title
 
 
 async def store_sections(
@@ -381,19 +329,17 @@ async def store_sections(
         end_s = int(round(section[-1]["end"]))
         section_text = " ".join(s["text"].strip() for s in section)
 
-        # Execute heavy deep learning pipelines offloaded inside an isolation thread pool
-        title, summary = await asyncio.to_thread(process_metadata_locally, section_text)
+        title = await asyncio.to_thread(process_metadata_locally, section_text)
 
         async with store.pool.acquire() as conn:
             async with conn.transaction():
-                segment_id: str = await conn.fetchval(
+                chapter_id: str = await conn.fetchval(
                     """
-                    INSERT INTO segments
-                        (episode_id, batch_id, segment_idx, start_time, end_time, title, summary, transcript)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                    ON CONFLICT (episode_id, segment_idx) DO UPDATE
+                    INSERT INTO chapters
+                        (episode_id, batch_id, chapter_idx, start_time, end_time, title, transcript)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    ON CONFLICT (episode_id, chapter_idx) DO UPDATE
                         SET title      = EXCLUDED.title,
-                            summary    = EXCLUDED.summary,
                             transcript = EXCLUDED.transcript,
                             start_time = EXCLUDED.start_time,
                             end_time   = EXCLUDED.end_time,
@@ -406,13 +352,12 @@ async def store_sections(
                     start_s,
                     end_s,
                     title,
-                    summary,
                     section_text,
                 )
 
                 line_records = [
                     (
-                        str(segment_id),
+                        str(chapter_id),
                         batch_id,
                         line_idx,
                         int(round(line["start"])),
@@ -425,9 +370,9 @@ async def store_sections(
                 await conn.executemany(
                     """
                     INSERT INTO transcript_lines
-                        (segment_id, batch_id, line_idx, start_time, end_time, text)
+                        (chapter_id, batch_id, line_idx, start_time, end_time, text)
                     VALUES ($1, $2, $3, $4, $5, $6)
-                    ON CONFLICT (segment_id, line_idx) DO UPDATE
+                    ON CONFLICT (chapter_id, line_idx) DO UPDATE
                         SET text       = EXCLUDED.text,
                             start_time = EXCLUDED.start_time,
                             end_time   = EXCLUDED.end_time,
@@ -443,11 +388,16 @@ async def store_sections(
 async def process_episode(
     episode_id: str, batch_id: str, store: Store, minio: Minio
 ) -> None:
-    transcript_key: Optional[str] = await store.pool.fetchval(
-        "SELECT transcript_key FROM episodes WHERE id = $1", episode_id
+    # Fetch both transcript_key and podcast_id
+    row = await store.pool.fetchrow(
+        "SELECT transcript_key, podcast_id FROM episodes WHERE id = $1", episode_id
     )
-    if not transcript_key:
+
+    if not row or not row["transcript_key"]:
         raise ValueError(f"Episode {episode_id} has no transcript_key")
+
+    transcript_key = row["transcript_key"]
+    podcast_id = str(row["podcast_id"])
 
     transcript = await asyncio.to_thread(download_transcript, minio, transcript_key)
     whisper_segments: List[Dict[str, Any]] = transcript.get("segments", [])
@@ -458,7 +408,14 @@ async def process_episode(
 
     sections = section_transcript_by_topic(whisper_segments)
     total_lines = await store_sections(episode_id, batch_id, sections, store)
-    logger.info(f"Episode {episode_id}: {len(sections)} sections generated.")
+
+    # Update both episode and podcast timestamps
+    await store.set_preprocessing_updated_at(episode_id)
+    await store.set_podcast_preprocessing_updated_at(podcast_id)
+
+    logger.info(
+        f"Episode {episode_id} (Podcast {podcast_id}): {len(sections)} sections generated."
+    )
 
 
 async def claim_and_process_batch(
@@ -563,5 +520,5 @@ if __name__ == "__main__":
     import nltk
 
     nltk.download("punkt", quiet=True)
-    nltk.download("stopwords", quiet=True)  # Added missing resource
+    nltk.download("stopwords", quiet=True)
     asyncio.run(main())

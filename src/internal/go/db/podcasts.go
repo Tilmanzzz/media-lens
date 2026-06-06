@@ -114,13 +114,13 @@ func (s *Store) GetPodcastsForIngestion(ctx context.Context, mode string) ([]Pod
 	var query string
 
 	if mode == "full" {
-		query = `SELECT id, guid, feed_url, title, ingested_at, updated_at, max_episodes FROM podcasts`
+		query = `SELECT id, guid, feed_url, title, ingested_at, max_episodes FROM podcasts`
 	} else {
 		// Incremental: Include never-fetched podcasts OR where source update timestamp mismatches ingestion timestamp
 		query = `
-			SELECT id, guid, feed_url, title, ingested_at, updated_at, max_episodes 
+			SELECT id, guid, feed_url, title, ingested_at, source_system_updated_at, max_episodes 
 			FROM podcasts 
-			WHERE updated_at IS NULL OR updated_at != ingested_at`
+			WHERE source_system_updated_at IS NULL OR source_system_updated_at > ingested_at`
 	}
 
 	err := pgxscan.Select(ctx, s.Pool, &pp, query)
@@ -138,7 +138,7 @@ func (s *Store) UpdatePodcastMetadata(ctx context.Context, id string, guid strin
 
 func (s *Store) SetPodcastSourceUpdatedAt(ctx context.Context, id string) error {
 	// Technical helper to simulate/write the last modified timestamp from the source feed boundary
-	query := `UPDATE podcasts SET updated_at = NOW() WHERE id = $1`
+	query := `UPDATE podcasts SET ingestion_ts = NOW() WHERE id = $1`
 	_, err := s.Pool.Exec(ctx, query, id)
 	return err
 }
