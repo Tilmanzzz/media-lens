@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mmcdole/gofeed"
@@ -125,7 +127,13 @@ func (w *worker) processPodcast(ctx context.Context, p db.Podcast, loadMode, bat
 		guid = itunes["author"][0].Value + feed.Title
 	}
 
-	if err := w.store.UpdatePodcastMetadata(ctx, p.ID, guid, feed.Title, feed.Description, batchID); err != nil {
+	hosts := extractHosts(feed)
+	sourceUpdated := feed.UpdatedParsed
+	if sourceUpdated == nil {
+		sourceUpdated = feed.PublishedParsed
+	}
+
+	if err := w.store.UpdatePodcastMetadata(ctx, p.ID, guid, feed.Title, feed.Description, hosts, sourceUpdated, batchID); err != nil {
 		return nil, fmt.Errorf("metadata update failed: %w", err)
 	}
 
@@ -208,15 +216,21 @@ func (w *worker) processEpisode(
 		}
 	}
 
+	var duration *int
+	if itunes, ok := item.Extensions["itunes"]; ok && len(itunes["duration"]) > 0 {
+		duration = parseDuration(itunes["duration"][0].Value)
+	}
+
 	return &db.Episode{
-		PodcastID:    p.ID,
-		GUID:         item.GUID,
-		Title:        item.Title,
-		AudioKey:     audioKey,
-		CoverKey:     coverKey,
-		PublishedAt:  item.PublishedParsed,
-		EnclosureURL: enclosureURL,
-		BatchID:      batchID,
+		PodcastID:       p.ID,
+		GUID:            item.GUID,
+		Title:           item.Title,
+		AudioKey:        audioKey,
+		CoverKey:        coverKey,
+		PublishedAt:     item.PublishedParsed,
+		DurationSeconds: duration,
+		EnclosureURL:    enclosureURL,
+		BatchID:         batchID,
 	}, nil
 }
 
@@ -284,4 +298,48 @@ func extractImageURL(item *gofeed.Item) string {
 		}
 	}
 	return ""
+}
+
+// converts iTunes/RSS duration to secondes
+func parseDuration(val string) *int {
+	if val == "" {
+		return nil
+	}
+	parts := strings.Split(val, ":")
+	var total int
+	if len(parts) == 3 {
+		h, _ := strconv.Atoi(parts[0])
+		m, _ := strconv.Atoi(parts[1])
+		s, _ := strconv.Atoi(parts[2])
+		total = h*3600 + m*60 + s
+	} else if len(parts) == 2 {
+		m, _ := strconv.Atoi(parts[0])
+		s, _ := strconv.Atoi(parts[1])
+		total = m*60 + s
+	} else {
+		total, _ = strconv.Atoi(val)
+	}
+
+	if total == 0 {
+		return nil
+	}
+	return &total
+}
+
+func extractHosts(feed *gofeed.Feed) string {
+	var hosts []string
+	if len(feed.Authors) > 0 {
+		for _, a := range feed.Authors {
+			if a.Name != "" {
+				hosts = append(hosts, a.Name)
+			}
+		}
+	} else if itunes := feed.Extensions["itunes"]; itunes != nil && len(itunes["author"]) > 0 {
+		for _, a := range itunes["author"] {
+			if a.Value != "" {
+				hosts = append(hosts, a.Value)
+			}
+		}
+	}
+	return strings.Join(hosts, ", ")
 }

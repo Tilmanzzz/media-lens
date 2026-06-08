@@ -58,7 +58,7 @@ class PipelineBatch(BaseModel):
 class Podcast(BaseModel):
     id: uuid.UUID
     guid: str
-    persons: Optional[str] = None
+    hosts: Optional[str] = None
     feed_url: str
     title: str
     description: Optional[str] = None

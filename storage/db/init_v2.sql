@@ -30,7 +30,7 @@ CREATE TABLE podcasts (
   id                  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   guid                TEXT        NOT NULL,
   -- Text with people and their roles
-  persons             TEXT,
+  hosts               TEXT,
   feed_url            TEXT        NOT NULL UNIQUE,
   title               TEXT        NOT NULL,
   description         TEXT,
@@ -103,8 +103,8 @@ CREATE TABLE chapters (
   batch_id        UUID          REFERENCES pipeline_batches(id) ON DELETE SET NULL,
   preprocessing_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   processing_updated_at TIMESTAMPTZ,
-  CONSTRAINT uq_chapters_episode_idx UNIQUE (episode_id, chapters_idx),
-  CONSTRAINT ck_chapters_chapter_idx CHECK (chapters_idx >= 0),
+  CONSTRAINT uq_chapters_episode_idx UNIQUE (episode_id, chapter_idx),
+  CONSTRAINT ck_chapters_chapter_idx CHECK (chapter_idx >= 0),
   CONSTRAINT ck_chapters_time_range CHECK (end_time >= start_time),
   CONSTRAINT ck_chapters_start_time CHECK (start_time >= 0),
   CONSTRAINT ck_chapters_end_time CHECK (end_time >= 0)

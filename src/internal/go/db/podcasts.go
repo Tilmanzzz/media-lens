@@ -63,7 +63,7 @@ func (s *Store) StopPreviousBatchIfNeeded(ctx context.Context, batchID string) e
 func (s *Store) InsertPodcast(
 	ctx context.Context,
 	guid string,
-	persons *string,
+	hosts *string,
 	feedURL string,
 	title string,
 	description *string,
@@ -78,7 +78,7 @@ func (s *Store) InsertPodcast(
 		`
 		INSERT INTO podcasts (
 			guid,
-			persons,
+			hosts,
 			feed_url,
 			title,
 			description,
@@ -95,7 +95,7 @@ func (s *Store) InsertPodcast(
 		ON CONFLICT (feed_url) DO NOTHING
 		`,
 		guid,
-		persons,
+		hosts,
 		feedURL,
 		title,
 		description,
@@ -127,12 +127,24 @@ func (s *Store) GetPodcastsForIngestion(ctx context.Context, mode string) ([]Pod
 	return pp, err
 }
 
-func (s *Store) UpdatePodcastMetadata(ctx context.Context, id string, guid string, title string, description string, batchID string) error {
+func (s *Store) UpdatePodcastMetadata(
+	ctx context.Context,
+	id, guid, title, description, hosts string,
+	sourceSystemUpdatedAt *time.Time,
+	batchID string,
+) error {
 	query := `
 		UPDATE podcasts
-		SET guid = $1, title = $2, description = $3, batch_id = $4, ingested_at = NOW()
-		WHERE id = $5`
-	_, err := s.Pool.Exec(ctx, query, guid, title, description, batchID, id)
+		SET guid = $2,
+		    title = $3,
+		    description = $4,
+		    hosts = $5, 
+		    source_system_updated_at = $6,
+		    batch_id = $7::uuid,
+		    ingestion_updated_at = NOW()
+		WHERE id = $1::uuid`
+
+	_, err := s.Pool.Exec(ctx, query, id, guid, title, description, hosts, sourceSystemUpdatedAt, batchID)
 	return err
 }
 

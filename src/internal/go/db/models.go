@@ -16,13 +16,14 @@ type Podcast struct {
 }
 
 type Episode struct {
-	ID           string     `db:"id"`
-	PodcastID    string     `db:"podcast_id"`
-	GUID         string     `db:"guid"`
-	Title        string     `db:"title"`
-	AudioKey     string     `db:"audio_key"`
-	CoverKey     string     `db:"cover_key"`
-	PublishedAt  *time.Time `db:"published_at"`
-	EnclosureURL string     `db:"enclosure_url"`
-	BatchID      string     `db:"batch_id"`
+	ID              string     `db:"id"`
+	PodcastID       string     `db:"podcast_id"`
+	GUID            string     `db:"guid"`
+	Title           string     `db:"title"`
+	AudioKey        string     `db:"audio_key"`
+	CoverKey        string     `db:"cover_key"`
+	PublishedAt     *time.Time `db:"published_at"`
+	DurationSeconds *int       `db:"duration_seconds"`
+	EnclosureURL    string     `db:"enclosure_url"`
+	BatchID         string     `db:"batch_id"`
 }

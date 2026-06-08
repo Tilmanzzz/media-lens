@@ -134,13 +134,13 @@ func (s *Store) BulkUpsertEpisodes(ctx context.Context, eps []Episode) ([]string
 		return nil, nil
 	}
 
-	// 1. Deconstruct the struct slice into parallel flat primitive arrays
 	podcastIDs := make([]string, len(eps))
 	guids := make([]string, len(eps))
 	titles := make([]string, len(eps))
 	audioKeys := make([]string, len(eps))
 	coverKeys := make([]string, len(eps))
 	publishedAts := make([]*time.Time, len(eps))
+	durations := make([]*int, len(eps)) // Neues Array
 	enclosureURLs := make([]string, len(eps))
 	batchIDs := make([]string, len(eps))
 
@@ -151,13 +151,13 @@ func (s *Store) BulkUpsertEpisodes(ctx context.Context, eps []Episode) ([]string
 		audioKeys[i] = ep.AudioKey
 		coverKeys[i] = ep.CoverKey
 		publishedAts[i] = ep.PublishedAt
+		durations[i] = ep.DurationSeconds // Mapping
 		enclosureURLs[i] = ep.EnclosureURL
 		batchIDs[i] = ep.BatchID
 	}
 
-	// 2. Stream all values inside a single unnest matrix expression
 	query := `
-		INSERT INTO episodes (podcast_id, guid, title, audio_key, cover_key, published_at, enclosure_url, batch_id) 
+		INSERT INTO episodes (podcast_id, guid, title, audio_key, cover_key, published_at, duration_seconds, enclosure_url, batch_id) 
 		SELECT * FROM unnest(
 			$1::uuid[], 
 			$2::text[], 
@@ -165,31 +165,25 @@ func (s *Store) BulkUpsertEpisodes(ctx context.Context, eps []Episode) ([]string
 			$4::text[], 
 			$5::text[], 
 			$6::timestamptz[], 
-			$7::text[], 
-			$8::uuid[]
+			$7::integer[], 
+			$8::text[], 
+			$9::uuid[]
 		)
 		ON CONFLICT (podcast_id, guid) DO UPDATE SET 
 			title = EXCLUDED.title,
 			audio_key = EXCLUDED.audio_key,
 			cover_key = EXCLUDED.cover_key,
 			published_at = EXCLUDED.published_at,
+			duration_seconds = EXCLUDED.duration_seconds,
 			enclosure_url = EXCLUDED.enclosure_url,
 			batch_id = EXCLUDED.batch_id,
 			ingested_at = NOW(),
 			ingestion_updated_at = NOW()
 		RETURNING id`
 
-	// 3. Collect the returning database UUIDs back into a simple string array via scany
 	var ids []string
 	err := pgxscan.Select(ctx, s.Pool, &ids, query,
-		podcastIDs,
-		guids,
-		titles,
-		audioKeys,
-		coverKeys,
-		publishedAts,
-		enclosureURLs,
-		batchIDs,
+		podcastIDs, guids, titles, audioKeys, coverKeys, publishedAts, durations, enclosureURLs, batchIDs,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("bulk upsert failed: %w", err)
