@@ -13,14 +13,12 @@ import (
 	"github.com/mmcdole/gofeed"
 	"github.com/tilmanzzz/audio-lens/internal/go/blob"
 	"github.com/tilmanzzz/audio-lens/internal/go/db"
-	"github.com/tilmanzzz/audio-lens/internal/go/queue"
 )
 
 // worker groups shared external clients
 type worker struct {
 	store      *db.Store
 	bronze     *blob.Bucket
-	queue      *queue.Client
 	httpClient *http.Client
 	feedParser *gofeed.Parser
 }
@@ -101,15 +99,9 @@ func setupWorker(ctx context.Context) *worker {
 		log.Fatalf("minio connection failed: %v", err)
 	}
 
-	q, err := queue.NewClient(os.Getenv("REDIS_ADDR"))
-	if err != nil {
-		log.Fatalf("queue connection failed: %v", err)
-	}
-
 	return &worker{
 		store:      store,
 		bronze:     bronze,
-		queue:      q,
 		httpClient: &http.Client{Timeout: 15 * time.Minute},
 		feedParser: gofeed.NewParser(),
 	}
@@ -273,17 +265,8 @@ func (w *worker) uploadMedia(
 }
 
 func (w *worker) flushEpisodes(ctx context.Context, eps []db.Episode) error {
-	insertedIDs, err := w.store.BulkUpsertEpisodes(ctx, eps)
-	if err != nil {
-		return err
-	}
-
-	for _, id := range insertedIDs {
-		if err := w.queue.EnqueueTranscription(ctx, id); err != nil {
-			log.Printf("warning: failed to queue %s: %v", id, err)
-		}
-	}
-	return nil
+	_, err := w.store.BulkUpsertEpisodes(ctx, eps)
+	return err
 }
 
 // extractImageURL checks standard elements and itunes extensions
