@@ -1,6 +1,6 @@
 // @title           Audiolens API
 // @version         1.0
-// @description     Podcast analysis backend — episodes, topics, transcripts, fact-checks, chat.
+// @description     Podcast analysis backend — episodes, chapters, transcripts, fact-checks, chat.
 // @host            localhost:8080
 // @BasePath        /api/v1
 package main
@@ -35,7 +35,6 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Connect to PostgreSQL with retry
 	var db *database.DB
 	for i := 0; i < 5; i++ {
 		db, err = database.NewPostgresDB(cfg.PostgresURL)
@@ -49,26 +48,23 @@ func main() {
 		log.Fatalf("Failed to connect to database after retries: %v", err)
 	}
 
-	// Connect to MinIO
 	minioClient, err := storage.NewMinioClient(cfg)
 	if err != nil {
 		log.Fatalf("Failed to connect to MinIO: %v", err)
 	}
 
-	// Create Ollama embedder and pgvector client
 	ollamaClient := embedder.NewOllamaClient(cfg.OllamaURL, cfg.EmbeddingModel)
 	pgvectorClient := vectorstore.NewPgVectorClient(db)
 
-	// Create repositories
 	episodeRepo := repository.NewEpisodeRepository(db)
-	topicRepo := repository.NewTopicRepository(db)
+	chapterRepo := repository.NewChapterRepository(db)
 	transcriptRepo := repository.NewTranscriptRepository(db)
 	factCheckRepo := repository.NewFactCheckRepository(db)
-	conversationRepo := repository.NewConversationRepository(db)
+	conversationRepo := repository.NewConversationRepository()
 
 	h := &handlers.Handler{
 		Episodes:      episodeRepo,
-		Topics:        topicRepo,
+		Chapters:      chapterRepo,
 		Transcripts:   transcriptRepo,
 		FactChecks:    factCheckRepo,
 		Conversations: conversationRepo,
@@ -81,8 +77,7 @@ func main() {
 
 	r := gin.Default()
 
-	// Global middleware
-	r.Use(handlers.MaxBodySize(1 << 20)) // 1 MB max request body
+	r.Use(handlers.MaxBodySize(1 << 20))
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.CORSOrigins,
 		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
@@ -92,29 +87,24 @@ func main() {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	// API v1
 	v1 := r.Group("/api/v1")
 	{
 		v1.GET("/health", h.HealthCheck)
 		v1.GET("/search", h.SemanticSearch)
 
-		// Episodes
 		v1.GET("/episodes", h.ListEpisodes)
 		v1.GET("/episodes/:id", handlers.ValidateUUID("id"), h.GetEpisode)
-		v1.GET("/episodes/:id/topics", handlers.ValidateUUID("id"), h.GetTopics)
+		v1.GET("/episodes/:id/chapters", handlers.ValidateUUID("id"), h.GetChapters)
 		v1.GET("/episodes/:id/transcript", handlers.ValidateUUID("id"), h.GetTranscript)
 		v1.GET("/episodes/:id/fact-checks", handlers.ValidateUUID("id"), h.GetFactChecks)
 		v1.GET("/episodes/:id/sync", handlers.ValidateUUID("id"), h.SyncPlayback)
 
-		// Chat
 		v1.POST("/chat/conversations", h.CreateConversation)
 		v1.POST("/chat/conversations/:id/messages", handlers.ValidateUUID("id"), h.SendMessage)
 	}
 
-	// Swagger UI
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	// Graceful shutdown
 	srv := &http.Server{
 		Addr:    cfg.ServerPort,
 		Handler: r,
