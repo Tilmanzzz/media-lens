@@ -12,6 +12,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"media-lens/backend/internal/config"
 	"media-lens/backend/internal/embedder"
+	"media-lens/backend/internal/llm"
 	"media-lens/backend/internal/model"
 	"media-lens/backend/internal/repository"
 	"media-lens/backend/internal/storage"
@@ -19,16 +20,16 @@ import (
 )
 
 type Handler struct {
-	Episodes      repository.EpisodeRepository
-	Chapters      repository.ChapterRepository
-	Transcripts   repository.TranscriptRepository
-	FactChecks    repository.FactCheckRepository
-	Conversations repository.ConversationRepository
-	Minio         *minio.Client
-	Config        *config.Config
-	DB            *sql.DB
-	Embedder      *embedder.OllamaClient
-	VectorStore   *vectorstore.PgVectorClient
+	Episodes    repository.EpisodeRepository
+	Chapters    repository.ChapterRepository
+	Transcripts repository.TranscriptRepository
+	FactChecks  repository.FactCheckRepository
+	LLM         *llm.GeminiClient
+	Minio       *minio.Client
+	Config      *config.Config
+	DB          *sql.DB
+	Embedder    *embedder.OllamaClient
+	VectorStore *vectorstore.PgVectorClient
 }
 
 func respondError(c *gin.Context, status int, errCode, message string) {

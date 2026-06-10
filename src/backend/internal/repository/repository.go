@@ -7,9 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 
-	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"media-lens/backend/internal/model"
 )
@@ -277,50 +275,6 @@ func (r *postgresFactCheckRepo) ListByEpisodeID(ctx context.Context, episodeID s
 		claims = append(claims, c)
 	}
 	return claims, rows.Err()
-}
-
-// --- Conversation Repository (in-memory, chat is stubbed) ---
-
-type ConversationRepository interface {
-	Create(ctx context.Context, episodeID string) (string, error)
-	Exists(ctx context.Context, conversationID string) (bool, error)
-	GetEpisodeID(ctx context.Context, conversationID string) (string, error)
-}
-
-type inMemoryConversationRepo struct {
-	mu            sync.RWMutex
-	conversations map[string]string
-}
-
-func NewConversationRepository() ConversationRepository {
-	return &inMemoryConversationRepo{
-		conversations: make(map[string]string),
-	}
-}
-
-func (r *inMemoryConversationRepo) Create(_ context.Context, episodeID string) (string, error) {
-	id := uuid.New().String()
-	r.mu.Lock()
-	r.conversations[id] = episodeID
-	r.mu.Unlock()
-	return id, nil
-}
-
-func (r *inMemoryConversationRepo) Exists(_ context.Context, conversationID string) (bool, error) {
-	r.mu.RLock()
-	_, ok := r.conversations[conversationID]
-	r.mu.RUnlock()
-	return ok, nil
-}
-
-func (r *inMemoryConversationRepo) GetEpisodeID(_ context.Context, conversationID string) (string, error) {
-	r.mu.RLock()
-	episodeID, ok := r.conversations[conversationID]
-	r.mu.RUnlock()
-	if !ok {
-		return "", nil
-	}
-	return episodeID, nil
 }
 
 // ParseLimit parses a limit string with bounds enforcement.

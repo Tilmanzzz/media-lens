@@ -93,27 +93,12 @@ type FactChecksResponse struct {
 	Claims    []FactCheckClaim `json:"claims"`
 }
 
-type CreateConversationRequest struct {
-	EpisodeID string `json:"episode_id" binding:"required,uuid"`
+type ChatRequest struct {
+	Question string `json:"question" binding:"required,max=10000"`
 }
 
-type CreateConversationResponse struct {
-	ConversationID string `json:"conversation_id"`
-}
-
-type SendMessageRequest struct {
-	Text    string              `json:"text" binding:"required,max=10000"`
-	Context *SendMessageContext `json:"context,omitempty"`
-}
-
-type SendMessageContext struct {
-	CurrentTime *int `json:"current_time,omitempty"`
-}
-
-type ChatStreamChunk struct {
-	Type    string `json:"type"`
-	Delta   string `json:"delta,omitempty"`
-	Message string `json:"message,omitempty"`
+type ChatResponse struct {
+	Answer string `json:"answer"`
 }
 
 type SSEPositionEvent struct {

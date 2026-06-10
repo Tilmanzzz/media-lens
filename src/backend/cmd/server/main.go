@@ -23,6 +23,7 @@ import (
 	"media-lens/backend/internal/config"
 	"media-lens/backend/internal/database"
 	"media-lens/backend/internal/embedder"
+	"media-lens/backend/internal/llm"
 	"media-lens/backend/internal/repository"
 	"media-lens/backend/internal/storage"
 	"media-lens/backend/internal/vectorstore"
@@ -56,23 +57,28 @@ func main() {
 	ollamaClient := embedder.NewOllamaClient(cfg.OllamaURL, cfg.EmbeddingModel)
 	pgvectorClient := vectorstore.NewPgVectorClient(db)
 
+	ctx := context.Background()
+	geminiClient, err := llm.NewGeminiClient(ctx, cfg.GeminiAPIKey)
+	if err != nil {
+		log.Fatalf("Failed to create Gemini client: %v", err)
+	}
+
 	episodeRepo := repository.NewEpisodeRepository(db)
 	chapterRepo := repository.NewChapterRepository(db)
 	transcriptRepo := repository.NewTranscriptRepository(db)
 	factCheckRepo := repository.NewFactCheckRepository(db)
-	conversationRepo := repository.NewConversationRepository()
 
 	h := &handlers.Handler{
-		Episodes:      episodeRepo,
-		Chapters:      chapterRepo,
-		Transcripts:   transcriptRepo,
-		FactChecks:    factCheckRepo,
-		Conversations: conversationRepo,
-		Minio:         minioClient,
-		Config:        cfg,
-		DB:            db,
-		Embedder:      ollamaClient,
-		VectorStore:   pgvectorClient,
+		Episodes:    episodeRepo,
+		Chapters:    chapterRepo,
+		Transcripts: transcriptRepo,
+		FactChecks:  factCheckRepo,
+		LLM:         geminiClient,
+		Minio:       minioClient,
+		Config:      cfg,
+		DB:          db,
+		Embedder:    ollamaClient,
+		VectorStore: pgvectorClient,
 	}
 
 	r := gin.Default()
@@ -98,9 +104,7 @@ func main() {
 		v1.GET("/episodes/:id/transcript", handlers.ValidateUUID("id"), h.GetTranscript)
 		v1.GET("/episodes/:id/fact-checks", handlers.ValidateUUID("id"), h.GetFactChecks)
 		v1.GET("/episodes/:id/sync", handlers.ValidateUUID("id"), h.SyncPlayback)
-
-		v1.POST("/chat/conversations", h.CreateConversation)
-		v1.POST("/chat/conversations/:id/messages", handlers.ValidateUUID("id"), h.SendMessage)
+		v1.POST("/episodes/:id/chat", handlers.ValidateUUID("id"), h.Chat)
 	}
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
@@ -122,10 +126,10 @@ func main() {
 	<-quit
 	log.Println("Shutting down server...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
 
