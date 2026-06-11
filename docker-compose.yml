@@ -44,17 +44,6 @@ services:
       timeout: 5s
       retries: 1
 
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    command: redis-server --appendonly yes
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
 
   ingestion:
     build:
@@ -73,7 +62,7 @@ services:
       - MINIO_USER=${MINIO_USER}
       - MINIO_PASS=${MINIO_PASS}
       - POSTGRES_URL=${POSTGRES_URL}
-      - REDIS_ADDR=${REDIS_ADDR}
+      - LOAD_MODE=${LOAD_MODE}
 
   insertion:
     build:
@@ -83,6 +72,8 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     env_file:
       - .env
     profiles: ["tools"]
@@ -91,7 +82,7 @@ services:
       - MINIO_USER=${MINIO_USER}
       - MINIO_PASS=${MINIO_PASS}
       - POSTGRES_URL=${POSTGRES_URL}
-      - REDIS_ADDR=${REDIS_ADDR}
+
   transcription:
     build:
       context: ./src/
@@ -99,16 +90,49 @@ services:
     depends_on:
       minio:
         condition: service_healthy
-      redis:
-        condition: service_healthy
       postgres:
         condition: service_healthy
+    env_file:
+      - .env
     environment:
       - MINIO_ENDPOINT=${MINIO_ENDPOINT}
       - MINIO_USER=${MINIO_USER}
       - MINIO_PASS=${MINIO_PASS}
       - POSTGRES_URL=${POSTGRES_URL}
-      - REDIS_ADDR=${REDIS_ADDR}
+      - USE_CUDA=true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  sectioning:
+    build:
+      context: ./src
+      dockerfile: ./02_processing/sectioning/Dockerfile
+    depends_on:
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - POSTGRES_URL=${POSTGRES_URL}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+
   processing_silver:
     build: ./src/02_processing/silver/
     depends_on:
@@ -159,3 +183,4 @@ volumes:
   minio_data:
   pgadmin_data:
   ollama_data:
+  redis_data:

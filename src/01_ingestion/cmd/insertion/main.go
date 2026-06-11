@@ -4,32 +4,106 @@ import (
 	"context"
 	"log"
 	"os"
+	"time"
 
-	"github.com/tilmanzzz/audio-lens/internal/db"
+	"github.com/google/uuid"
+	"github.com/mmcdole/gofeed"
+
+	"github.com/tilmanzzz/audio-lens/internal/go/db"
 )
 
-func main() {
-	var rssURL string
-	if len(os.Args) < 2 {
-		// log.Fatal("Usage: go run cmd/insert/main.go <rss_url>")
-		rssURL = "https://feeds.acast.com/public/shows/93574422-e184-439d-9318-7e9ce0fb0a25"
-	} else {
-		rssURL = os.Args[1]
+func strPtr(s string) *string {
+	if s == "" {
+		return nil
 	}
+	return &s
+}
+
+func intPtr(i int) *int {
+	return &i
+}
+
+func main() {
+	var rssURLs []string
+
+	if len(os.Args) < 2 {
+		rssURLs = []string{
+			"https://feeds.megaphone.fm/ADL5417720568",
+			"https://rss.buzzsprout.com/1032730.rss",
+			"https://feeds.captivate.fm/thebest5minutewine/",
+			"https://feeds.transistor.fm/5-minute-morning-show",
+			"https://feed.podbean.com/themicropodcast/feed.xml",
+		}
+	} else {
+		// Take all command-line arguments as URLs
+		rssURLs = os.Args[1:]
+	}
+
 	ctx := context.Background()
 
-	// 1. Initialize Store (the NewStore logic we discussed in client.go/store.go)
 	store, err := db.NewStore(ctx, os.Getenv("POSTGRES_URL"))
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}
 	defer store.Close()
 
-	// 2. Call the podcast-specific logic
-	err = store.InsertPodcast(ctx, rssURL, 3)
-	if err != nil {
-		log.Fatalf("Could not insert podcast: %v", err)
-	}
+	parser := gofeed.NewParser()
 
-	log.Printf("Successfully added: %s", rssURL)
+	for _, rssURL := range rssURLs {
+		log.Printf("Processing feed: %s", rssURL)
+
+		feed, err := parser.ParseURL(rssURL)
+		if err != nil {
+			log.Printf("Failed to parse RSS feed %s: %v", rssURL, err)
+			continue // Skip to the next feed
+		}
+
+		// Feed GUID fallback strategy
+		guid := feed.FeedLink
+		if guid == "" {
+			guid = feed.Link
+		}
+		if guid == "" {
+			guid = rssURL
+		}
+		if guid == "" {
+			guid = uuid.NewString()
+		}
+
+		var imageURL *string
+		if feed.Image != nil {
+			imageURL = strPtr(feed.Image.URL)
+		}
+
+		var publishedAt *time.Time
+		if feed.PublishedParsed != nil {
+			publishedAt = feed.PublishedParsed
+		}
+
+		episodeCount := len(feed.Items)
+		maxEpisodes := 3
+
+		err = store.InsertPodcast(
+			ctx,
+			guid,
+			nil, // persons
+			rssURL,
+			feed.Title,
+			strPtr(feed.Description),
+			intPtr(episodeCount),
+			feed.Categories,
+			imageURL,
+			publishedAt,
+			&maxEpisodes,
+		)
+		if err != nil {
+			log.Printf("Could not insert podcast %s: %v", rssURL, err)
+			continue // Skip to the next feed
+		}
+
+		log.Printf("Successfully added podcast:")
+		log.Printf("Title: %s", feed.Title)
+		log.Printf("Episodes discovered: %d", episodeCount)
+		log.Printf("Feed URL: %s\n", rssURL)
+	}
 }
