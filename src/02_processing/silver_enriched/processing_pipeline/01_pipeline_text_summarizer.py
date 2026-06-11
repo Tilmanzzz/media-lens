@@ -116,7 +116,7 @@ def update_chapter_summaries(
 
     summaries = list(summaries)
     sql = (
-        "UPDATE chapter SET summary = %s, processing_updated_at = %s, batch_id = %s "
+        "UPDATE chapters SET summary = %s, processing_updated_at = %s, batch_id = %s "
         "WHERE id = %s"
     )
     params: List[tuple] = []

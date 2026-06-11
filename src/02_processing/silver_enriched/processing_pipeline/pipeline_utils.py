@@ -99,7 +99,7 @@ def _build_fetch_spec(step: str, level: Optional[str]) -> Dict[str, str]:
                 , ch.preprocessing_updated_at AS preprocessing_update_ts
             """,
             "from_sql": """
-                FROM chapter ch
+                FROM chapters ch
                 JOIN episodes e ON e.id = ch.episode_id
             """,
             "order_by": "e.id, ch.chapter_idx",
@@ -118,7 +118,7 @@ def _build_fetch_spec(step: str, level: Optional[str]) -> Dict[str, str]:
                 , ch.preprocessing_updated_at AS preprocessing_update_ts
             """,
             "from_sql": """
-                FROM chapter ch
+                FROM chapters ch
                 JOIN episodes e ON e.id = ch.episode_id
                 LEFT JOIN fact_checked_claims fc ON fc.chapter_id = ch.id
             """,
@@ -163,7 +163,7 @@ def _build_fetch_spec(step: str, level: Optional[str]) -> Dict[str, str]:
                     , ch.preprocessing_updated_at AS preprocessing_update_ts
                 """,
                 "from_sql": """
-                    FROM chapter ch
+                    FROM chapters ch
                     LEFT JOIN embeddings em
                         ON em.chapter_id = ch.id
                         AND em.level = 'chapter'
@@ -310,7 +310,7 @@ def fetch_chapter_ids_for_episode(
 ) -> List[str]:
     sql = """
         SELECT ch.id
-        FROM chapter ch
+        FROM chapters ch
         WHERE ch.episode_id = %s
         ORDER BY ch.chapter_idx
         LIMIT %s

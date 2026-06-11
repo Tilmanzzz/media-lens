@@ -175,7 +175,7 @@ sequenceDiagram
 ```sql
 -- Beispiel (Fact Checker)
 SELECT ch.id, MAX(fc.processing_updated_at) AS processing_update_ts
-FROM chapter ch
+FROM chapters ch
 LEFT JOIN fact_checked_claims fc ON fc.chapter_id = ch.id
 GROUP BY ch.id
 HAVING ch.preprocessing_updated_at > :watermark OR MAX(fc.processing_updated_at) IS NULL
