@@ -12,27 +12,26 @@ import (
 	"github.com/minio/minio-go/v7"
 	"media-lens/backend/internal/config"
 	"media-lens/backend/internal/embedder"
+	"media-lens/backend/internal/llm"
 	"media-lens/backend/internal/model"
 	"media-lens/backend/internal/repository"
 	"media-lens/backend/internal/storage"
 	"media-lens/backend/internal/vectorstore"
 )
 
-// Handler holds all dependencies for HTTP handlers.
 type Handler struct {
-	Episodes      repository.EpisodeRepository
-	Topics        repository.TopicRepository
-	Transcripts   repository.TranscriptRepository
-	FactChecks    repository.FactCheckRepository
-	Conversations repository.ConversationRepository
-	Minio         *minio.Client
-	Config        *config.Config
-	DB            *sql.DB
-	Embedder      *embedder.OllamaClient
-	VectorStore   *vectorstore.PgVectorClient
+	Episodes    repository.EpisodeRepository
+	Chapters    repository.ChapterRepository
+	Transcripts repository.TranscriptRepository
+	FactChecks  repository.FactCheckRepository
+	LLM         *llm.GeminiClient
+	Minio       *minio.Client
+	Config      *config.Config
+	DB          *sql.DB
+	Embedder    *embedder.OllamaClient
+	VectorStore *vectorstore.PgVectorClient
 }
 
-// respondError sends a standardized ApiError JSON response.
 func respondError(c *gin.Context, status int, errCode, message string) {
 	c.JSON(status, model.ApiError{
 		Error:   errCode,
@@ -41,13 +40,11 @@ func respondError(c *gin.Context, status int, errCode, message string) {
 	})
 }
 
-// respondInternalError logs the real error and sends a generic message to the client.
 func respondInternalError(c *gin.Context, err error) {
 	log.Printf("ERROR %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
 	respondError(c, http.StatusInternalServerError, "internal_error", "Ein interner Fehler ist aufgetreten.")
 }
 
-// ValidateUUID returns Gin middleware that validates a path parameter as UUID.
 func ValidateUUID(paramName string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param(paramName)
@@ -60,7 +57,6 @@ func ValidateUUID(paramName string) gin.HandlerFunc {
 	}
 }
 
-// MaxBodySize returns Gin middleware that limits request body size.
 func MaxBodySize(maxBytes int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Body != nil {
@@ -70,8 +66,6 @@ func MaxBodySize(maxBytes int64) gin.HandlerFunc {
 	}
 }
 
-// getEpisodeOrAbort fetches an episode by ID and handles 404/500 responses.
-// Returns nil if the request was aborted (error already sent to client).
 func (h *Handler) getEpisodeOrAbort(c *gin.Context, episodeID string) *model.Episode {
 	episode, err := h.Episodes.GetByID(c.Request.Context(), episodeID)
 	if err != nil {
@@ -85,22 +79,21 @@ func (h *Handler) getEpisodeOrAbort(c *gin.Context, episodeID string) *model.Epi
 	return episode
 }
 
-// presignCoverURLs batch-generates presigned cover URLs for a slice of episodes.
 func (h *Handler) presignCoverURLs(c *gin.Context, episodes []model.Episode) map[string]*url.URL {
 	urls := make(map[string]*url.URL, len(episodes))
 	for _, ep := range episodes {
-		if ep.CoverPath == "" {
+		if ep.CoverKey == "" {
 			continue
 		}
-		if _, exists := urls[ep.CoverPath]; exists {
+		if _, exists := urls[ep.CoverKey]; exists {
 			continue
 		}
-		u, err := storage.GeneratePresignedURL(c.Request.Context(), h.Minio, h.Config.MinioBucket, ep.CoverPath, 1*time.Hour)
+		u, err := storage.GeneratePresignedURL(c.Request.Context(), h.Minio, h.Config.MinioBucket, ep.CoverKey, 1*time.Hour)
 		if err != nil {
-			log.Printf("WARN presign cover %q: %v", ep.CoverPath, err)
+			log.Printf("WARN presign cover %q: %v", ep.CoverKey, err)
 			continue
 		}
-		urls[ep.CoverPath] = u
+		urls[ep.CoverKey] = u
 	}
 	return urls
 }
@@ -111,11 +104,12 @@ func episodeToCard(ep model.Episode, coverURLs map[string]*url.URL) model.Episod
 		Title:       ep.Title,
 		PodcastName: ep.PodcastName,
 		PublishedAt: formatDate(ep.PublishedAt),
+		Summary:     ep.Summary,
 	}
 	if ep.DurationSeconds != nil {
 		card.DurationSeconds = *ep.DurationSeconds
 	}
-	if u, ok := coverURLs[ep.CoverPath]; ok {
+	if u, ok := coverURLs[ep.CoverKey]; ok {
 		card.CoverURL = u.String()
 	}
 	return card
@@ -127,16 +121,17 @@ func (h *Handler) episodeToDetail(c *gin.Context, ep model.Episode) model.Episod
 		Title:       ep.Title,
 		PodcastName: ep.PodcastName,
 		PublishedAt: formatDate(ep.PublishedAt),
+		Summary:     ep.Summary,
 	}
 	if ep.DurationSeconds != nil {
 		detail.DurationSeconds = *ep.DurationSeconds
 	}
-	if ep.CoverPath != "" {
-		u, err := storage.GeneratePresignedURL(c.Request.Context(), h.Minio, h.Config.MinioBucket, ep.CoverPath, 1*time.Hour)
+	if ep.CoverKey != "" {
+		u, err := storage.GeneratePresignedURL(c.Request.Context(), h.Minio, h.Config.MinioBucket, ep.CoverKey, 1*time.Hour)
 		if err == nil {
 			detail.CoverURL = u.String()
 		} else {
-			log.Printf("WARN presign cover %q: %v", ep.CoverPath, err)
+			log.Printf("WARN presign cover %q: %v", ep.CoverKey, err)
 		}
 	}
 	return detail
@@ -149,7 +144,6 @@ func formatDate(t sql.NullTime) string {
 	return t.Time.Format("2006-01-02")
 }
 
-// ListEpisodes godoc
 // @Summary      Episode-Liste
 // @Description  Cursor-based paginated episode list with optional free-text search.
 // @Tags         episodes
@@ -192,7 +186,6 @@ func (h *Handler) ListEpisodes(c *gin.Context) {
 	})
 }
 
-// GetEpisode godoc
 // @Summary      Episode-Detail
 // @Description  Get episode detail for the header area above the tabs.
 // @Tags         episodes

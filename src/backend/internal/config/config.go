@@ -17,6 +17,7 @@ type Config struct {
 	CORSOrigins    []string
 	OllamaURL      string
 	EmbeddingModel string
+	GeminiAPIKey   string
 }
 
 func Load() (*Config, error) {
@@ -31,6 +32,7 @@ func Load() (*Config, error) {
 		CORSOrigins:    strings.Split(getEnvOrDefault("CORS_ORIGINS", "http://localhost:3000"), ","),
 		OllamaURL:      getEnvOrDefault("OLLAMA_URL", "http://ollama:11434"),
 		EmbeddingModel: getEnvOrDefault("EMBEDDING_MODEL", "qwen3-embedding:4b"),
+		GeminiAPIKey:   os.Getenv("GEMINI_API_KEY"),
 	}
 
 	if cfg.PostgresURL == "" {
@@ -41,6 +43,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.MinioPass == "" {
 		return nil, fmt.Errorf("MINIO_PASS is required")
+	}
+	if cfg.GeminiAPIKey == "" {
+		return nil, fmt.Errorf("GEMINI_API_KEY is required")
 	}
 
 	return cfg, nil

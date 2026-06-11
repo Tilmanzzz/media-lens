@@ -30,7 +30,7 @@ CREATE TABLE podcasts (
   id                  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   guid                TEXT        NOT NULL,
   -- Text with people and their roles
-  persons             TEXT,
+  hosts               TEXT,
   feed_url            TEXT        NOT NULL UNIQUE,
   title               TEXT        NOT NULL,
   description         TEXT,

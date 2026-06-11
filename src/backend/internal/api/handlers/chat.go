@@ -1,98 +1,59 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
-	"time"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"media-lens/backend/internal/model"
 )
 
-// CreateConversation godoc
-// @Summary      Neue Chat-Session starten
-// @Description  Create a new chat conversation for an episode.
+// @Summary      Frage zum Podcast stellen
+// @Description  Ask a question about a podcast episode. The answer is generated based solely on the episode transcript.
 // @Tags         chat
 // @Accept       json
 // @Produce      json
-// @Param        body  body      model.CreateConversationRequest  true  "Episode ID"
-// @Success      201   {object}  model.CreateConversationResponse
+// @Param        id    path      string             true  "Episode ID (UUID)"
+// @Param        body  body      model.ChatRequest  true  "User question"
+// @Success      200   {object}  model.ChatResponse
 // @Failure      400   {object}  model.ApiError
-// @Router       /chat/conversations [post]
-func (h *Handler) CreateConversation(c *gin.Context) {
-	var req model.CreateConversationRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_request", "Ungültige Anfrage: "+err.Error())
-		return
-	}
-
-	episode := h.getEpisodeOrAbort(c, req.EpisodeID)
+// @Failure      404   {object}  model.ApiError
+// @Failure      503   {object}  model.ApiError
+// @Router       /episodes/{id}/chat [post]
+func (h *Handler) Chat(c *gin.Context) {
+	episode := h.getEpisodeOrAbort(c, c.Param("id"))
 	if episode == nil {
 		return
 	}
 
-	conversationID, err := h.Conversations.Create(c.Request.Context(), req.EpisodeID)
-	if err != nil {
-		respondInternalError(c, err)
-		return
-	}
-
-	c.JSON(http.StatusCreated, model.CreateConversationResponse{
-		ConversationID: conversationID,
-	})
-}
-
-// SendMessage godoc
-// @Summary      Nachricht senden — Antwort kommt als Stream
-// @Description  Send a message and receive a stubbed NDJSON streaming response.
-// @Tags         chat
-// @Accept       json
-// @Produce      application/x-ndjson
-// @Param        id    path      string                     true  "Conversation ID (UUID)"
-// @Param        body  body      model.SendMessageRequest   true  "User message"
-// @Success      200   "NDJSON stream of ChatStreamChunk"
-// @Failure      400   {object}  model.ApiError
-// @Failure      404   {object}  model.ApiError
-// @Router       /chat/conversations/{id}/messages [post]
-func (h *Handler) SendMessage(c *gin.Context) {
-	conversationID := c.Param("id")
-
-	var req model.SendMessageRequest
+	var req model.ChatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondError(c, http.StatusBadRequest, "invalid_request", "Ungültige Anfrage: "+err.Error())
 		return
 	}
 
-	exists, err := h.Conversations.Exists(c.Request.Context(), conversationID)
+	lines, err := h.Transcripts.ListByEpisodeID(c.Request.Context(), episode.ID)
 	if err != nil {
 		respondInternalError(c, err)
 		return
 	}
-	if !exists {
-		respondError(c, http.StatusNotFound, "conversation_not_found", "Conversation mit dieser ID existiert nicht.")
+
+	if len(lines) == 0 {
+		respondError(c, http.StatusNotFound, "transcript_not_found", "Kein Transkript für diese Episode vorhanden.")
 		return
 	}
 
-	// Stubbed streaming response
-	c.Header("Content-Type", "application/x-ndjson")
-	c.Status(http.StatusOK)
-
-	encoder := json.NewEncoder(c.Writer)
-	stubTokens := []string{
-		"Das ", "ist ", "eine ", "Stub-Antwort. ",
-		"LLM-Integration ", "folgt ", "in ", "einer ", "späteren ", "Version.",
+	var sb strings.Builder
+	for _, line := range lines {
+		sb.WriteString(line.Text)
+		sb.WriteByte('\n')
 	}
 
-	for _, token := range stubTokens {
-		chunk := model.ChatStreamChunk{Type: "token", Delta: token}
-		if err := encoder.Encode(chunk); err != nil {
-			return
-		}
-		c.Writer.(http.Flusher).Flush()
-		time.Sleep(50 * time.Millisecond)
+	answer, err := h.LLM.Ask(c.Request.Context(), sb.String(), req.Question)
+	if err != nil {
+		respondError(c, http.StatusServiceUnavailable, "LLM_UNAVAILABLE", "LLM-Service ist nicht verfügbar.")
+		return
 	}
 
-	done := model.ChatStreamChunk{Type: "done"}
-	_ = encoder.Encode(done)
-	c.Writer.(http.Flusher).Flush()
+	c.JSON(http.StatusOK, model.ChatResponse{Answer: answer})
 }

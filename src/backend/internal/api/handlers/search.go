@@ -10,7 +10,6 @@ import (
 	"media-lens/backend/internal/storage"
 )
 
-// SemanticSearch godoc
 // @Summary      Semantic search
 // @Description  Search episodes and transcript chunks using natural-language queries via vector similarity.
 // @Tags         search
@@ -77,8 +76,8 @@ func (h *Handler) SemanticSearch(c *gin.Context) {
 	items := make([]model.SearchResultItem, 0, len(episodeHits))
 	for _, ep := range episodeHits {
 		coverURL := ""
-		if ep.CoverPath != "" {
-			if u, err := storage.GeneratePresignedURL(c.Request.Context(), h.Minio, h.Config.MinioBucket, ep.CoverPath, time.Hour); err == nil {
+		if ep.CoverKey != "" {
+			if u, err := storage.GeneratePresignedURL(c.Request.Context(), h.Minio, h.Config.MinioBucket, ep.CoverKey, time.Hour); err == nil {
 				coverURL = u.String()
 			}
 		}
@@ -90,7 +89,7 @@ func (h *Handler) SemanticSearch(c *gin.Context) {
 
 		items = append(items, model.SearchResultItem{
 			EpisodeID:   ep.EpisodeID,
-			Title:       ep.EpisodeTitle,
+			Title:       ep.Title,
 			PodcastName: ep.PodcastName,
 			CoverURL:    coverURL,
 			Score:       ep.Score,
