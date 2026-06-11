@@ -10,17 +10,17 @@ import (
 )
 
 type EpisodeHit struct {
-	EpisodeID    string  `json:"episode_id"`
-	EpisodeTitle string  `json:"episode_title"`
-	PodcastName  string  `json:"podcast_name"`
-	CoverPath    string  `json:"cover_path"`
-	Score        float64 `json:"score"`
+	EpisodeID string  `json:"episode_id"`
+	Title     string  `json:"title"`
+	PodcastName string `json:"podcast_name"`
+	CoverKey  string  `json:"cover_key"`
+	Score     float64 `json:"score"`
 }
 
 type ChunkHit struct {
 	EpisodeID string  `json:"episode_id"`
 	Text      string  `json:"text"`
-	StartTime int     `json:"start_time"`
+	StartTime float64 `json:"start_time"`
 	Score     float64 `json:"score"`
 }
 
@@ -33,15 +33,17 @@ func NewPgVectorClient(db *sql.DB) *PgVectorClient {
 }
 
 func (c *PgVectorClient) SearchEpisodes(ctx context.Context, vector []float64, limit int, minScore float64) ([]EpisodeHit, error) {
-	vec := pgvector.NewVector(toFloat32(vector))
+	vec := pgvector.NewHalfVector(toFloat32(vector))
 
 	rows, err := c.db.QueryContext(ctx, `
-		SELECT episode_id, episode_title, podcast_name, cover_path,
-		       1 - (embedding <=> $1::vector) AS score
-		FROM embeddings
-		WHERE embedding_level = 'episode'
-		  AND 1 - (embedding <=> $1::vector) >= $2
-		ORDER BY embedding <=> $1::vector
+		SELECT e.id, e.title, p.title, COALESCE(e.cover_key, ''),
+		       1 - (emb.embedding <=> $1::halfvec) AS score
+		FROM embeddings emb
+		JOIN episodes e ON e.id = emb.episode_id
+		JOIN podcasts p ON p.id = e.podcast_id
+		WHERE emb.level = 'episode'
+		  AND 1 - (emb.embedding <=> $1::halfvec) >= $2
+		ORDER BY emb.embedding <=> $1::halfvec
 		LIMIT $3`,
 		vec, minScore, limit,
 	)
@@ -53,7 +55,7 @@ func (c *PgVectorClient) SearchEpisodes(ctx context.Context, vector []float64, l
 	var episodes []EpisodeHit
 	for rows.Next() {
 		var h EpisodeHit
-		if err := rows.Scan(&h.EpisodeID, &h.EpisodeTitle, &h.PodcastName, &h.CoverPath, &h.Score); err != nil {
+		if err := rows.Scan(&h.EpisodeID, &h.Title, &h.PodcastName, &h.CoverKey, &h.Score); err != nil {
 			return nil, fmt.Errorf("scan episode hit: %w", err)
 		}
 		episodes = append(episodes, h)
@@ -66,7 +68,7 @@ func (c *PgVectorClient) SearchChunks(ctx context.Context, vector []float64, epi
 		return nil, nil
 	}
 
-	vec := pgvector.NewVector(toFloat32(vector))
+	vec := pgvector.NewHalfVector(toFloat32(vector))
 
 	placeholders := make([]string, len(episodeIDs))
 	args := []any{vec, minScore}
@@ -78,13 +80,14 @@ func (c *PgVectorClient) SearchChunks(ctx context.Context, vector []float64, epi
 	limitPlaceholder := fmt.Sprintf("$%d", len(args))
 
 	query := fmt.Sprintf(`
-		SELECT episode_id, text, start_time,
-		       1 - (embedding <=> $1::vector) AS score
-		FROM embeddings
-		WHERE embedding_level = 'chunk'
-		  AND episode_id IN (%s)
-		  AND 1 - (embedding <=> $1::vector) >= $2
-		ORDER BY embedding <=> $1::vector
+		SELECT ch.episode_id, COALESCE(ch.transcript, ''), ch.start_time,
+		       1 - (emb.embedding <=> $1::halfvec) AS score
+		FROM embeddings emb
+		JOIN chapters ch ON ch.id = emb.chapter_id
+		WHERE emb.level = 'chapter'
+		  AND ch.episode_id IN (%s)
+		  AND 1 - (emb.embedding <=> $1::halfvec) >= $2
+		ORDER BY emb.embedding <=> $1::halfvec
 		LIMIT %s`,
 		strings.Join(placeholders, ","), limitPlaceholder,
 	)

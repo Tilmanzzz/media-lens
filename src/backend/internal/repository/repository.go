@@ -29,12 +29,13 @@ func NewEpisodeRepository(db *sql.DB) EpisodeRepository {
 
 func (r *postgresEpisodeRepo) GetByID(ctx context.Context, id string) (*model.Episode, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, title, COALESCE(podcast_id, ''), COALESCE(podcast_name, ''),
-		       published_at, duration_seconds,
-		       COALESCE(audio_path, ''), COALESCE(xml_path, ''),
-		       COALESCE(cover_path, ''), ingested_at
-		FROM episodes
-		WHERE id = $1
+		SELECT e.id, e.title, e.podcast_id, p.title,
+		       e.published_at, e.duration_seconds,
+		       COALESCE(e.audio_key, ''), COALESCE(e.cover_key, ''),
+		       COALESCE(e.summary, ''), e.ingested_at
+		FROM episodes e
+		JOIN podcasts p ON p.id = e.podcast_id
+		WHERE e.id = $1
 	`, id)
 
 	ep, err := scanEpisode(row)
@@ -47,8 +48,6 @@ func (r *postgresEpisodeRepo) GetByID(ctx context.Context, id string) (*model.Ep
 	return ep, nil
 }
 
-// ListPaginated implements cursor-based pagination with optional free-text search.
-// Cursor encodes the ingested_at+id of the last seen row (base64).
 func (r *postgresEpisodeRepo) ListPaginated(ctx context.Context, q string, cursor string, limit int) ([]model.Episode, int, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
@@ -60,7 +59,7 @@ func (r *postgresEpisodeRepo) ListPaginated(ctx context.Context, q string, curso
 
 	if q != "" {
 		pattern := "%" + q + "%"
-		whereClauses = append(whereClauses, fmt.Sprintf("(title ILIKE $%d OR COALESCE(podcast_name, '') ILIKE $%d)", argIdx, argIdx))
+		whereClauses = append(whereClauses, fmt.Sprintf("(e.title ILIKE $%d OR p.title ILIKE $%d)", argIdx, argIdx))
 		args = append(args, pattern)
 		argIdx++
 	}
@@ -71,7 +70,7 @@ func (r *postgresEpisodeRepo) ListPaginated(ctx context.Context, q string, curso
 			parts := strings.SplitN(string(decoded), "|", 2)
 			if len(parts) == 2 {
 				whereClauses = append(whereClauses, fmt.Sprintf(
-					"(ingested_at, id) < ($%d::timestamptz, $%d::uuid)", argIdx, argIdx+1))
+					"(e.ingested_at, e.id) < ($%d::timestamptz, $%d::uuid)", argIdx, argIdx+1))
 				args = append(args, parts[0], parts[1])
 				argIdx += 2
 			}
@@ -83,20 +82,25 @@ func (r *postgresEpisodeRepo) ListPaginated(ctx context.Context, q string, curso
 		whereSQL = "WHERE " + strings.Join(whereClauses, " AND ")
 	}
 
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM episodes %s", whereSQL)
+	countQuery := fmt.Sprintf(`
+		SELECT COUNT(*)
+		FROM episodes e
+		JOIN podcasts p ON p.id = e.podcast_id
+		%s`, whereSQL)
 	var total int
 	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count episodes: %w", err)
 	}
 
 	dataQuery := fmt.Sprintf(`
-		SELECT id, title, COALESCE(podcast_id, ''), COALESCE(podcast_name, ''),
-		       published_at, duration_seconds,
-		       COALESCE(audio_path, ''), COALESCE(xml_path, ''),
-		       COALESCE(cover_path, ''), ingested_at
-		FROM episodes
+		SELECT e.id, e.title, e.podcast_id, p.title,
+		       e.published_at, e.duration_seconds,
+		       COALESCE(e.audio_key, ''), COALESCE(e.cover_key, ''),
+		       COALESCE(e.summary, ''), e.ingested_at
+		FROM episodes e
+		JOIN podcasts p ON p.id = e.podcast_id
 		%s
-		ORDER BY ingested_at DESC, id DESC
+		ORDER BY e.ingested_at DESC, e.id DESC
 		LIMIT $%d
 	`, whereSQL, argIdx)
 	args = append(args, limit)
@@ -115,7 +119,6 @@ func (r *postgresEpisodeRepo) ListPaginated(ctx context.Context, q string, curso
 	return episodes, total, nil
 }
 
-// EncodeCursor creates a cursor string from an episode.
 func EncodeCursor(ep model.Episode) string {
 	raw := ep.IngestedAt.Format("2006-01-02T15:04:05.999999Z07:00") + "|" + ep.ID
 	return base64.StdEncoding.EncodeToString([]byte(raw))
@@ -126,7 +129,7 @@ func scanEpisode(row *sql.Row) (*model.Episode, error) {
 	var durationSeconds sql.NullInt64
 	err := row.Scan(&ep.ID, &ep.Title, &ep.PodcastID, &ep.PodcastName,
 		&ep.PublishedAt, &durationSeconds,
-		&ep.AudioPath, &ep.XMLPath, &ep.CoverPath, &ep.IngestedAt)
+		&ep.AudioKey, &ep.CoverKey, &ep.Summary, &ep.IngestedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +147,7 @@ func scanEpisodes(rows *sql.Rows) ([]model.Episode, error) {
 		var durationSeconds sql.NullInt64
 		if err := rows.Scan(&ep.ID, &ep.Title, &ep.PodcastID, &ep.PodcastName,
 			&ep.PublishedAt, &durationSeconds,
-			&ep.AudioPath, &ep.XMLPath, &ep.CoverPath, &ep.IngestedAt); err != nil {
+			&ep.AudioKey, &ep.CoverKey, &ep.Summary, &ep.IngestedAt); err != nil {
 			return nil, fmt.Errorf("scan episode row: %w", err)
 		}
 		if durationSeconds.Valid {
@@ -156,41 +159,41 @@ func scanEpisodes(rows *sql.Rows) ([]model.Episode, error) {
 	return episodes, rows.Err()
 }
 
-// --- Topic Repository ---
+// --- Chapter Repository ---
 
-type TopicRepository interface {
-	ListByEpisodeID(ctx context.Context, episodeID string) ([]model.TopicCard, error)
+type ChapterRepository interface {
+	ListByEpisodeID(ctx context.Context, episodeID string) ([]model.ChapterCard, error)
 }
 
-type postgresTopicRepo struct {
+type postgresChapterRepo struct {
 	db *sql.DB
 }
 
-func NewTopicRepository(db *sql.DB) TopicRepository {
-	return &postgresTopicRepo{db: db}
+func NewChapterRepository(db *sql.DB) ChapterRepository {
+	return &postgresChapterRepo{db: db}
 }
 
-func (r *postgresTopicRepo) ListByEpisodeID(ctx context.Context, episodeID string) ([]model.TopicCard, error) {
+func (r *postgresChapterRepo) ListByEpisodeID(ctx context.Context, episodeID string) ([]model.ChapterCard, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, topic, start_time, emotion::text, COALESCE(summary, '')
-		FROM topics
+		SELECT id, chapter_idx, COALESCE(title, ''), COALESCE(summary, ''), start_time, end_time
+		FROM chapters
 		WHERE episode_id = $1
-		ORDER BY start_time ASC
+		ORDER BY chapter_idx ASC
 	`, episodeID)
 	if err != nil {
-		return nil, fmt.Errorf("query topics: %w", err)
+		return nil, fmt.Errorf("query chapters: %w", err)
 	}
 	defer rows.Close()
 
-	var topics []model.TopicCard
+	var chapters []model.ChapterCard
 	for rows.Next() {
-		var t model.TopicCard
-		if err := rows.Scan(&t.ID, &t.Topic, &t.StartTime, &t.Emotion, &t.Summary); err != nil {
-			return nil, fmt.Errorf("scan topic row: %w", err)
+		var ch model.ChapterCard
+		if err := rows.Scan(&ch.ID, &ch.ChapterIdx, &ch.Title, &ch.Summary, &ch.StartTime, &ch.EndTime); err != nil {
+			return nil, fmt.Errorf("scan chapter row: %w", err)
 		}
-		topics = append(topics, t)
+		chapters = append(chapters, ch)
 	}
-	return topics, rows.Err()
+	return chapters, rows.Err()
 }
 
 // --- Transcript Repository ---
@@ -209,12 +212,13 @@ func NewTranscriptRepository(db *sql.DB) TranscriptRepository {
 
 func (r *postgresTranscriptRepo) ListByEpisodeID(ctx context.Context, episodeID string) ([]model.TranscriptLine, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT tl.id, tl.start_time, tl.text,
-		       CASE WHEN fc.id IS NOT NULL THEN true ELSE false END AS has_fact_flag
+		SELECT tl.id, tl.chapter_id, tl.start_time, tl.end_time, tl.text,
+		       COALESCE(tl.emotion::text, 'neutral'), COALESCE(tl.emotion_score, 0),
+		       EXISTS(SELECT 1 FROM fact_checked_claims fc WHERE fc.chapter_id = tl.chapter_id)
 		FROM transcript_lines tl
-		LEFT JOIN fact_checks fc ON fc.episode_id = tl.episode_id AND fc.start_time = tl.start_time
-		WHERE tl.episode_id = $1
-		ORDER BY tl.start_time ASC
+		JOIN chapters ch ON ch.id = tl.chapter_id
+		WHERE ch.episode_id = $1
+		ORDER BY ch.chapter_idx, tl.line_idx
 	`, episodeID)
 	if err != nil {
 		return nil, fmt.Errorf("query transcript lines: %w", err)
@@ -224,7 +228,8 @@ func (r *postgresTranscriptRepo) ListByEpisodeID(ctx context.Context, episodeID 
 	var lines []model.TranscriptLine
 	for rows.Next() {
 		var l model.TranscriptLine
-		if err := rows.Scan(&l.ID, &l.StartTime, &l.Text, &l.HasFactFlag); err != nil {
+		if err := rows.Scan(&l.ID, &l.ChapterID, &l.StartTime, &l.EndTime, &l.Text,
+			&l.Emotion, &l.EmotionScore, &l.HasFactFlag); err != nil {
 			return nil, fmt.Errorf("scan transcript line: %w", err)
 		}
 		lines = append(lines, l)
@@ -248,11 +253,12 @@ func NewFactCheckRepository(db *sql.DB) FactCheckRepository {
 
 func (r *postgresFactCheckRepo) ListByEpisodeID(ctx context.Context, episodeID string) ([]model.FactCheckClaim, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, start_time, claim, verdict::text, COALESCE(explanation, ''),
-		       COALESCE(sources, '{}')
-		FROM fact_checks
-		WHERE episode_id = $1
-		ORDER BY start_time ASC
+		SELECT fc.id, fc.chapter_id, COALESCE(fc.claim_idx, 0), COALESCE(fc.claim, ''),
+		       fc.verdict::text, COALESCE(fc.explanation, ''), COALESCE(fc.sources, '{}')
+		FROM fact_checked_claims fc
+		JOIN chapters ch ON ch.id = fc.chapter_id
+		WHERE ch.episode_id = $1
+		ORDER BY ch.chapter_idx, fc.claim_idx
 	`, episodeID)
 	if err != nil {
 		return nil, fmt.Errorf("query fact checks: %w", err)
@@ -262,66 +268,13 @@ func (r *postgresFactCheckRepo) ListByEpisodeID(ctx context.Context, episodeID s
 	var claims []model.FactCheckClaim
 	for rows.Next() {
 		var c model.FactCheckClaim
-		if err := rows.Scan(&c.ID, &c.StartTime, &c.Claim, &c.Verdict,
-			&c.Explanation, pq.Array(&c.Sources)); err != nil {
+		if err := rows.Scan(&c.ID, &c.ChapterID, &c.ClaimIdx, &c.Claim,
+			&c.Verdict, &c.Explanation, pq.Array(&c.Sources)); err != nil {
 			return nil, fmt.Errorf("scan fact check: %w", err)
 		}
 		claims = append(claims, c)
 	}
 	return claims, rows.Err()
-}
-
-// --- Conversation Repository ---
-
-type ConversationRepository interface {
-	Create(ctx context.Context, episodeID string) (string, error)
-	Exists(ctx context.Context, conversationID string) (bool, error)
-	GetEpisodeID(ctx context.Context, conversationID string) (string, error)
-}
-
-type postgresConversationRepo struct {
-	db *sql.DB
-}
-
-func NewConversationRepository(db *sql.DB) ConversationRepository {
-	return &postgresConversationRepo{db: db}
-}
-
-func (r *postgresConversationRepo) Create(ctx context.Context, episodeID string) (string, error) {
-	var id string
-	err := r.db.QueryRowContext(ctx, `
-		INSERT INTO conversations (episode_id) VALUES ($1)
-		RETURNING id
-	`, episodeID).Scan(&id)
-	if err != nil {
-		return "", fmt.Errorf("create conversation: %w", err)
-	}
-	return id, nil
-}
-
-func (r *postgresConversationRepo) Exists(ctx context.Context, conversationID string) (bool, error) {
-	var exists bool
-	err := r.db.QueryRowContext(ctx, `
-		SELECT EXISTS(SELECT 1 FROM conversations WHERE id = $1)
-	`, conversationID).Scan(&exists)
-	if err != nil {
-		return false, fmt.Errorf("check conversation exists: %w", err)
-	}
-	return exists, nil
-}
-
-func (r *postgresConversationRepo) GetEpisodeID(ctx context.Context, conversationID string) (string, error) {
-	var episodeID string
-	err := r.db.QueryRowContext(ctx, `
-		SELECT episode_id FROM conversations WHERE id = $1
-	`, conversationID).Scan(&episodeID)
-	if err == sql.ErrNoRows {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("get conversation episode_id: %w", err)
-	}
-	return episodeID, nil
 }
 
 // ParseLimit parses a limit string with bounds enforcement.
