@@ -135,16 +135,22 @@ def _build_fetch_spec(step: str, level: Optional[str]) -> Dict[str, str]:
         return {
             "id_column": "tl.id",
             "select_sql": """
+                e.id AS episode_id,
                 tl.id AS transcript_line_id,
+                tl.line_idx AS line_idx,
                 tl.start_time AS start_time,
                 tl.end_time AS end_time
+                , tl.text AS transcript_text
+                , e.audio_key AS audio_key
                 , tl.processing_updated_at AS processing_update_ts
                 , tl.preprocessing_updated_at AS preprocessing_update_ts
             """,
             "from_sql": """
                 FROM transcript_lines tl
+                JOIN chapters ch ON ch.id = tl.chapter_id
+                JOIN episodes e ON e.id = ch.episode_id
             """,
-            "order_by": "tl.chapter_id, tl.line_idx",
+            "order_by": "e.id, ch.chapter_idx, tl.line_idx",
             "preprocessing_ts": "tl.preprocessing_updated_at",
             "processing_ts": "tl.processing_updated_at",
         }

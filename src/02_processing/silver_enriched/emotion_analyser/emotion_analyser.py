@@ -16,8 +16,9 @@ if str(SRC_DIR) not in sys.path:
 
 
 from common.app_logger import AppLogger
-from emotion_config import EmotionConfig
-from emotion_label_catalog import EmotionLabelCatalog
+
+from .emotion_config import EmotionConfig
+from .emotion_label_catalog import EmotionLabelCatalog
 
 
 class EmotionAnalyser:
@@ -26,6 +27,9 @@ class EmotionAnalyser:
         config: Optional[EmotionConfig] = None,
         config_path: Optional[str | Path] = None,
     ) -> None:
+        if config is None and config_path is None:
+            config_path = Path(__file__).resolve().with_name("emotion_analyser_config.json")
+
         if config is None and config_path is not None:
             config = EmotionConfig.from_file(config_path)
 

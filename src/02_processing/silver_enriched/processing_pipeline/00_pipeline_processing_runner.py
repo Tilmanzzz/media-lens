@@ -36,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--steps",
-        default="text_summarizer",
+        default="text_summarizer,fact_checker,embedder,emotion_scoring",
         help="Comma-separated steps to run, or 'processing' for all steps",
     )
     parser.add_argument("--testing", action="store_true", help="Enable test run parameters")
@@ -133,6 +133,7 @@ def main() -> None:
                 "text_summarizer": base_dir / "01_pipeline_text_summarizer.py",
                 "fact_checker": base_dir / "02_pipeline_fact_checker.py",
                 "embedder": base_dir / "03_pipeline_embedder.py",
+                "emotion_scoring": base_dir / "04_pipeline_emotion_scoring.py",
             }
 
             if "processing" in steps:
