@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, DefaultDict, Dict, Iterable, List, Optional
 
@@ -20,8 +20,8 @@ from silver_enriched.emotion_analyser.emotion_analyser import EmotionAnalyser
 from silver_enriched.emotion_analyser.minio_utils import (
     download_object_to_path, init_minio_client)
 from silver_enriched.processing_pipeline.pipeline_utils import (
-    LoadContext, build_pipeline_logger, fetch_chunks, load_json_config,
-    pipeline_batch_scope)
+    LoadContext, build_pipeline_logger, fetch_chunks, fetch_db_now,
+    load_json_config, pipeline_batch_scope)
 
 
 def parse_args() -> argparse.Namespace:
@@ -186,7 +186,8 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
         analyser = EmotionAnalyser()
 
         # persistent per-episode cache (configurable via --cache-dir, EMOTION_CACHE_DIR, or emotion_analyser_config.json)
-        cache_dir_arg = args.cache_dir or os.environ.get("EMOTION_CACHE_DIR") or analyser.config.audio_cache_dir
+        # getattr: --cache-dir only exists on this step's own parser, not on the runner's args.
+        cache_dir_arg = getattr(args, "cache_dir", None) or os.environ.get("EMOTION_CACHE_DIR") or analyser.config.audio_cache_dir
         cache_root = Path(cache_dir_arg).expanduser()
         try:
             cache_root.mkdir(parents=True, exist_ok=True)
@@ -315,7 +316,7 @@ def main() -> None:
         ctx = LoadContext(
             mode=args.mode,
             connector=connector,
-            processing_update_ts=datetime.now(timezone.utc),
+            processing_update_ts=fetch_db_now(conn),
             logger=logger,
             dry_run=args.dry_run,
         )

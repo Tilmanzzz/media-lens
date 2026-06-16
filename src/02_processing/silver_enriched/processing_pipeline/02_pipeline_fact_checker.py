@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -15,7 +16,7 @@ from common.db_connector import DbConnector
 from silver_enriched.fact_checker.fact_checker_core import FactChecker
 from silver_enriched.processing_pipeline.pipeline_utils import (
     LoadContext, build_pipeline_logger, fetch_chapter_ids_for_episode,
-    fetch_chunks, load_json_config, pipeline_batch_scope)
+    fetch_chunks, fetch_db_now, load_json_config, pipeline_batch_scope)
 
 
 def parse_args() -> argparse.Namespace:
@@ -189,23 +190,32 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
 
         logger.info("fact_checker: chunks=%d", len(chunks))
 
-        checker = FactChecker(logging_enabled=args.log_enabled, log_level=args.log_level)
+        checker = FactChecker(
+            config_path="fact_checker_config.json",
+            logging_enabled=args.log_enabled,
+            log_level=args.log_level,
+        )
         checker.logger = logger
 
-        chapter_results: List[Dict[str, Any]] = []
-        for chunk in chunks:
+        def process_chunk(chunk: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             transcript = str(chunk.get("transcript_text") or "").strip()
             chapter_id = chunk.get("chapter_id")
             if not chapter_id or not transcript:
-                continue
+                return None
 
             logger.info("fact_checker: start chapter_id=%s", chapter_id)
             result = checker.fact_check(transcript)
             claims = result.get("claims") if isinstance(result, dict) else []
             if not isinstance(claims, list):
                 claims = []
-            chapter_results.append({"chapter_id": chapter_id, "claims": claims})
             logger.info("fact_checker: done chapter_id=%s claims=%d", chapter_id, len(claims))
+            return {"chapter_id": chapter_id, "claims": claims}
+
+        max_chapter_workers = max(1, min(checker.config.max_chapter_workers, len(chunks)))
+        with ThreadPoolExecutor(max_workers=max_chapter_workers) as executor:
+            chapter_results = [
+                result for result in executor.map(process_chunk, chunks) if result is not None
+            ]
 
         if not chapter_results:
             logger.warning("fact_checker: no claims")
@@ -247,7 +257,7 @@ def main() -> None:
         ctx = LoadContext(
             mode=args.mode,
             connector=connector,
-            processing_update_ts=datetime.now(timezone.utc),
+            processing_update_ts=fetch_db_now(conn),
             logger=logger,
             dry_run=args.dry_run,
         )

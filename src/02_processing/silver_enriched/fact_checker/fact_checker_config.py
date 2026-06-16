@@ -27,6 +27,8 @@ class FactCheckerConfig:
     max_queries_per_claim: int = 3
     max_search_results_per_query: int = 2
     max_sources_per_claim: int = 5
+    max_workers: int = 4
+    max_chapter_workers: int = 2
     logging_enabled: bool = False
     log_level: str = "INFO"
     log_dir: str = "../logs"
@@ -66,6 +68,8 @@ class FactCheckerConfig:
             "max_queries_per_claim": self.max_queries_per_claim,
             "max_search_results_per_query": self.max_search_results_per_query,
             "max_sources_per_claim": self.max_sources_per_claim,
+            "max_workers": self.max_workers,
+            "max_chapter_workers": self.max_chapter_workers,
             "logging_enabled": self.logging_enabled,
             "log_level": self.log_level,
             "log_dir": self.log_dir,

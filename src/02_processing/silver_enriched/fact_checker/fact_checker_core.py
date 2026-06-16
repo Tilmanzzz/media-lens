@@ -4,7 +4,7 @@ import json
 import os
 import re
 import sys
-import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -57,31 +57,6 @@ def _dedupe_preserve_order(items: Iterable[str]) -> List[str]:
         seen.add(value)
         ordered.append(value)
     return ordered
-
-
-_TRANSPORT_ERROR_HINTS = (
-    "error sending request",
-    "connection refused",
-    "connection reset",
-    "connection aborted",
-    "failed to lookup address",
-    "name resolution",
-    "name or service not known",
-    "tls",
-    "ssl",
-    "timed out",
-    "timeout",
-)
-
-
-def _is_transport_error(exc: Exception) -> bool:
-    """Detect low-level connection/transport failures (DNS, TLS, refused, timeout, ...).
-
-    These will not resolve by retrying the exact same request, unlike a transient
-    "no results" response from a single search backend.
-    """
-    message = str(exc).lower()
-    return any(hint in message for hint in _TRANSPORT_ERROR_HINTS)
 
 
 def _compact_sources(raw_results: Iterable[Dict[str, Any]], limit: int) -> List[Dict[str, str]]:
@@ -269,138 +244,129 @@ class FactChecker:
         return deduped[: self.config.max_queries_per_claim] or [claim]
 
     def _research_claims(self, claims: List[str]) -> Dict[str, List[Dict[str, str]]]:
-        research_data: Dict[str, List[Dict[str, str]]] = {}
+        # Claims are independent of each other, so research them concurrently.
+        # The work is I/O-bound (LLM query generation + web search), so threads
+        # give a real speedup despite the GIL.
+        total = len(claims)
+        results: List[List[Dict[str, str]]] = [[] for _ in claims]
+        max_workers = max(1, min(self.config.max_workers, total))
+        self.logger.info("Researching %d claims with %d worker(s)", total, max_workers)
 
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_index = {
+                executor.submit(self._research_one_claim, claim, f"{index + 1}/{total}"): index
+                for index, claim in enumerate(claims)
+            }
+            for future in as_completed(future_to_index):
+                index = future_to_index[future]
+                results[index] = future.result()
+
+        # Keep claim order so downstream claim_idx assignment stays stable across runs.
+        return {claim: results[index] for index, claim in enumerate(claims)}
+
+    def _research_one_claim(self, claim: str, label: str) -> List[Dict[str, str]]:
+        # `label` (e.g. "3/12") tags every log line of this worker so the
+        # interleaved output of concurrent claims stays readable.
+        self.logger.debug("[research %s] researching claim: %s", label, claim)
+        queries = self._generate_queries(claim)
+        raw_results: List[Dict[str, Any]] = []
+
+        # A DDGS instance is not safe to share across threads, so each worker
+        # gets its own short-lived client.
         with DDGS(timeout=self.config.search_timeout) as ddgs:
-            for claim in claims:
-                self.logger.debug("Researching claim: %s", claim)
-                queries = self._generate_queries(claim)
-                raw_results: List[Dict[str, Any]] = []
+            for query in queries:
+                try:
+                    result_iter = ddgs.text(
+                        query,
+                        max_results=self.config.max_search_results_per_query,
+                        region=self.config.region,
+                        backend=self.config.search_backend,
+                    )
+                    raw_results.extend(list(result_iter))
+                except DDGSException as exc:
+                    message = str(exc)
+                    if "No results found" in message:
+                        self.logger.warning("[research %s] search returned no results: %s", label, query)
+                    else:
+                        self.logger.error("[research %s] search failed, skipping: %s | %s", label, query, message)
+                except Exception as exc:
+                    self.logger.exception("[research %s] search failed, skipping: %s | %s", label, query, str(exc))
 
-                for query in queries:
-                    max_attempts = 3
-                    for attempt in range(1, max_attempts + 1):
-                        try:
-                            result_iter = ddgs.text(
-                                query,
-                                max_results=self.config.max_search_results_per_query,
-                                region=self.config.region,
-                                backend=self.config.search_backend,
-                            )
-                            raw_results.extend(list(result_iter))
-                            break
-                        except DDGSException as exc:
-                            message = str(exc)
-                            if "No results found" in message:
-                                self.logger.warning("Search returned no results: %s", query)
-                                break
-
-                            if _is_transport_error(exc):
-                                self.logger.error(
-                                    "Search failed due to connection/transport error, no retry: %s | %s",
-                                    query,
-                                    message,
-                                )
-                                break
-
-                            if attempt >= max_attempts:
-                                self.logger.exception("Search failed after retries: %s", query)
-                                break
-
-                            backoff = 0.5 * (2 ** (attempt - 1))
-                            self.logger.warning(
-                                "Search failed (attempt %d/%d), retry in %.1fs: %s",
-                                attempt,
-                                max_attempts,
-                                backoff,
-                                query,
-                            )
-                            time.sleep(backoff)
-                        except Exception as exc:
-                            if _is_transport_error(exc):
-                                self.logger.error(
-                                    "Search failed due to connection/transport error, no retry: %s | %s",
-                                    query,
-                                    str(exc),
-                                )
-                                break
-
-                            if attempt >= max_attempts:
-                                self.logger.exception("Search failed after retries: %s", query)
-                                break
-                            backoff = 0.5 * (2 ** (attempt - 1))
-                            self.logger.warning(
-                                "Search failed (attempt %d/%d), retry in %.1fs: %s",
-                                attempt,
-                                max_attempts,
-                                backoff,
-                                query,
-                            )
-                            time.sleep(backoff)
-
-                research_data[claim] = _compact_sources(raw_results, self.config.max_sources_per_claim)
-                self.logger.debug(
-                    "Collected %d compacted sources for claim",
-                    len(research_data[claim]),
-                )
-
-        return research_data
+        compacted = _compact_sources(raw_results, self.config.max_sources_per_claim)
+        self.logger.debug("[research %s] collected %d compacted sources", label, len(compacted))
+        return compacted
 
     def _verify_claims(self, research: Dict[str, List[Dict[str, str]]]) -> List[Dict[str, Any]]:
-        verdicts: List[Dict[str, Any]] = []
+        # Each claim is judged independently, so verify them concurrently as well.
+        claims = list(research.keys())
+        total = len(claims)
+        results: List[Optional[Dict[str, Any]]] = [None] * total
+        max_workers = max(1, min(self.config.max_workers, total))
+        self.logger.info("Verifying %d claims with %d worker(s)", total, max_workers)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_index = {
+                executor.submit(
+                    self._verify_one_claim, claim, research[claim], f"{index + 1}/{total}"
+                ): index
+                for index, claim in enumerate(claims)
+            }
+            for future in as_completed(future_to_index):
+                index = future_to_index[future]
+                results[index] = future.result()
+
+        # Keep claim order so downstream claim_idx assignment stays stable across runs.
+        return [verdict for verdict in results if verdict is not None]
+
+    def _verify_one_claim(self, claim: str, sources: List[Dict[str, str]], label: str) -> Dict[str, Any]:
+        # `label` (e.g. "3/12") tags every log line of this worker so the
+        # interleaved output of concurrent claims stays readable.
+        if not sources:
+            self.logger.debug("[verify %s] no sources, marking UNVERIFIABLE: %s", label, claim)
+            return {
+                "claim": claim,
+                "verdict": "UNVERIFIABLE",
+                "explanation": "No reliable evidence could be retrieved for this claim.",
+                "sources": [],
+            }
+
         allowed_verdicts = ", ".join(self.config.allowed_verdicts)
 
-        for claim in research.keys():
-            sources = research[claim]
-            if not sources:
-                self.logger.debug("No sources found for claim, marking UNVERIFIABLE: %s", claim)
-                verdicts.append(
-                    {
-                        "claim": claim,
-                        "verdict": "UNVERIFIABLE",
-                        "explanation": "No reliable evidence could be retrieved for this claim.",
-                        "sources": [],
-                    }
-                )
-                continue
+        system_prompt = f"""
+        You are a professional fact checker.
+        Use ONLY the provided evidence. Do not use outside knowledge.
+        The explanation MUST BE concise and easy to understand.
 
-            system_prompt = f"""
-            You are a professional fact checker.
-            Use ONLY the provided evidence. Do not use outside knowledge.
-            The explanation MUST BE concise and easy to understand.
+        Allowed verdicts: {allowed_verdicts}
 
-            Allowed verdicts: {allowed_verdicts}
+        Return ONLY valid JSON with this schema:
+        {{
+        "claim": "...",
+        "verdict": "...",
+        "explanation": "...",
+        "sources": ["https://..."]
+        }}
+        """.strip()
 
-            Return ONLY valid JSON with this schema:
-            {{
-            "claim": "...",
-            "verdict": "...",
-            "explanation": "...",
-            "sources": ["https://..."]
-            }}
-            """.strip()
+        verify_prompt = f"""
+        Claim:
+        {claim}
 
-            verify_prompt = f"""
-            Claim:
-            {claim}
+        Available Evidence:
+        {sources}
+        """.strip()
 
-            Available Evidence:
-            {research[claim]}
-            """.strip()
+        response = self.llm.invoke(
+            [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=verify_prompt),
+            ]
+        )
 
-            response = self.llm.invoke(
-                [
-                    SystemMessage(content=system_prompt),
-                    HumanMessage(content=verify_prompt),
-                ]
-            )
-
-            parsed = _parse_json(_response_to_text(response), {})
-            if not isinstance(parsed, dict):
-                self.logger.warning("Verifier response was not a JSON object for claim: %s", claim)
-            verdicts.append(self._normalize_verdict(claim, parsed, sources))
-
-        return verdicts
+        parsed = _parse_json(_response_to_text(response), {})
+        if not isinstance(parsed, dict):
+            self.logger.warning("[verify %s] verifier response was not a JSON object: %s", label, claim)
+        return self._normalize_verdict(claim, parsed, sources)
 
     def _normalize_verdict(
         self,

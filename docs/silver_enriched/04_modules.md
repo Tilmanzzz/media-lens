@@ -12,12 +12,12 @@ flowchart TD
 
 ## Module im Überblick
 
-| Modul | Was es macht | Modell / LLM |
-| --- | --- | --- |
-| **Text Summarizer** | Fasst Kapitel- und Episoden-Transkripte automatisiert zusammen | LLM via `provider` (z. B. `gemini-2.5-flash` oder lokal über `ollama`), zum Zusammenfassen |
-| **Fact Checker** | Extrahiert Behauptungen aus dem Transkript, recherchiert sie im Web und bewertet sie mit Verdict | LLM via `provider` (`gemini`/`ollama`), je einmal zum Extrahieren, Suchanfragen generieren und Bewerten; dazu Web-Suche über `ddgs` (DuckDuckGo) |
-| **Embedder** | Erzeugt Vektor-Embeddings auf Podcast-, Episoden- und Kapitel-Ebene für semantische Suche | `qwen3-embedding:4b` über Ollama, reines Embedding-Modell, kein Chat/Reasoning |
-| **Emotion Analyser** | Klassifiziert die Emotion einzelner Transkript-Zeilen anhand des zugehörigen Audio-Ausschnitts | `superb/wav2vec2-base-superb-er` (Hugging Face), Audio-Klassifikation, kein LLM |
+| Modul                | Was es macht                                                                                     | Modell / LLM                                                                                                                                     |
+| -------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Text Summarizer**  | Fasst Kapitel- und Episoden-Transkripte automatisiert zusammen                                   | LLM via `provider` (z. B. `gemini-3.5-flash` oder lokal über `ollama`), zum Zusammenfassen                                                       |
+| **Fact Checker**     | Extrahiert Behauptungen aus dem Transkript, recherchiert sie im Web und bewertet sie mit Verdict | LLM via `provider` (`gemini`/`ollama`), je einmal zum Extrahieren, Suchanfragen generieren und Bewerten; dazu Web-Suche über `ddgs` (DuckDuckGo) |
+| **Embedder**         | Erzeugt Vektor-Embeddings auf Podcast-, Episoden- und Kapitel-Ebene für semantische Suche        | `qwen3-embedding:4b` über Ollama, reines Embedding-Modell, kein Chat/Reasoning                                                                   |
+| **Emotion Analyser** | Klassifiziert die Emotion einzelner Transkript-Zeilen anhand des zugehörigen Audio-Ausschnitts   | `superb/wav2vec2-base-superb-er` (Hugging Face), Audio-Klassifikation, kein LLM                                                                  |
 
 ---
 
@@ -31,7 +31,7 @@ flowchart TD
 | **Input**       | `chapters.transcript`                                                        |
 | **Output**      | `episodes.summary`, `chapters.summary`                                       |
 | **LLM-Rolle**   | **LLM Summarizer**, fasst einen Text auf Vorgabe-Länge/-Stil zusammen        |
-| **Modell**      | via `provider` (`gemini` z. B. `gemini-2.5-flash`, oder lokal über `ollama`) |
+| **Modell**      | via `provider` (`gemini` z. B. `gemini-3.5-flash`, oder lokal über `ollama`) |
 | **Kern-Klasse** | `TextSummarizer` (`text_summarizer_core.py`)                                 |
 | **Config**      | `text_summarizer_config.json`                                                |
 
@@ -47,6 +47,29 @@ flowchart TD
     D --> G[(chapters.summary)]
     F --> H[(episodes.summary)]
 ```
+
+### Prompt-Strategie (Ausschnitt)
+
+Zwei statische `PromptTemplate`s, kein System-Prompt — die Rolle steckt direkt im User-Prompt:
+
+```text
+# Kapitel-Prompt
+Summarize the following podcast chapter in 1-3 sentences maximum.
+Be concise and capture only the core message.
+{text}
+Return ONLY the summary, no explanations or commentary.
+
+# Episoden-Prompt
+You are summarizing a complete podcast episode.
+{text}
+Create:
+1. An overall summary (2-3 sentences)
+2. Key takeaways of the highlights (bullet list)
+```
+
+- Bewusst **Freitext**, kein JSON-Schema (im Gegensatz zu `fact_checker`) — die Ausgabe landet
+  direkt in `chapters.summary` / `episodes.summary`.
+- `temperature: 0.0` — Zusammenfassungen sollen bei gleichem Input möglichst reproduzierbar sein.
 
 ### Besonderheiten
 
@@ -98,14 +121,92 @@ flowchart TD
 
 `TRUE`, `MOSTLY_TRUE`, `MISLEADING`, `FALSE`, `UNVERIFIABLE` (konfigurierbar über `allowed_verdicts`).
 
+### Prompt-Strategie (Ausschnitt)
+
+Alle drei LLM-Rollen erzwingen striktes JSON als Ausgabe (kein Markdown, keine Erklärtexte) —
+nötig, weil die Antwort direkt weiterverarbeitet wird (`_parse_json`):
+
+```text
+# LLM Claim Extractor (System-Prompt)
+You are an expert in extracting factual claims from transcript text.
+Rules:
+1. Extract only verifiable, real-world factual claims.
+2. Ignore pure opinions, jokes, speculation, rhetorical questions and personal preferences.
+IMPORTANT: A claim does NOT become an opinion just because it is stated in a conversation.
+3. Return ONLY a JSON list of claim strings. No markdown.
+4. If no factual claims exist, return [].
+
+# LLM Judge (System-Prompt)
+You are a professional fact checker.
+Use ONLY the provided evidence. Do not use outside knowledge.
+The explanation MUST BE concise and easy to understand.
+Allowed verdicts: {allowed_verdicts}
+Return ONLY valid JSON with this schema:
+{"claim": "...", "verdict": "...", "explanation": "...", "sources": ["https://..."]}
+```
+
+- **"Use ONLY the provided evidence"** ist die wichtigste Zeile im Judge-Prompt: verhindert, dass
+  das LLM aus seinem Trainingswissen heraus urteilt, statt anhand der tatsächlich gefundenen
+  Quellen — sonst wäre das Verdict nicht durch `sources` nachvollziehbar.
+- `allowed_verdicts` wird **dynamisch** in den System-Prompt eingesetzt, sodass eine Anpassung der
+  Config (z. B. zusätzliches Verdict) ohne Code-Änderung wirkt.
+
+### Parallelisierung: zwei Ebenen
+
+Es gibt **zwei verschachtelte** Thread-Pools — eine Ebene mehr als bei den anderen drei Modulen:
+
+```mermaid
+flowchart TD
+    R[Runner] --> SP{{Step-Pool<br/>max_chapter_workers}}
+    SP -->|Kapitel 1| CP1{{Claim-Pool<br/>max_workers}}
+    SP -->|Kapitel 2| CP2{{Claim-Pool<br/>max_workers}}
+    CP1 --> W1[Claim: Queries + Suche + Judge]
+    CP1 --> W2[Claim: Queries + Suche + Judge]
+    CP2 --> W3[Claim: Queries + Suche + Judge]
+```
+
+1. **Kapitel-Ebene** (`02_pipeline_fact_checker.py`, Step-Skript): mehrere Kapitel werden
+   gleichzeitig fact-checked, gesteuert über `max_chapter_workers` (Standard `2`,
+   **`fact_checker_config.json`**, nicht die Pipeline-Config — siehe [03_parameters.md](03_parameters.md)).
+2. **Claim-Ebene** (`fact_checker_core.py`, Modul-Kern): innerhalb eines Kapitels sind die
+   einzelnen Claims voneinander unabhängig, deshalb laufen sowohl die Recherche
+   (`_research_one_claim`) als auch die Bewertung (`_verify_one_claim`) über einen eigenen
+   `ThreadPoolExecutor`, gesteuert über `max_workers` (Standard `4`). Effektiv wird
+   `min(max_workers, Anzahl Claims)` genutzt. Die Arbeit ist I/O-lastig (HTTP zum LLM + Websuche),
+   daher bringen Threads trotz GIL einen echten Speedup.
+
+- **Worst-Case-Nebenläufigkeit:** `max_chapter_workers × max_workers` gleichzeitige
+  Such-/LLM-Aufrufe (Standard: `2 × 4 = 8`). Bei Rate-Limit-Fehlern (HTTP 429, DuckDuckGo-Blocks)
+  einen der beiden Werte reduzieren — beide gehen multiplikativ in die Gesamtlast ein.
+- Jeder Recherche-Worker bekommt eine **eigene `DDGS`-Instanz** (DDGS ist nicht thread-sicher).
+- Die **Reihenfolge der Claims bleibt erhalten** (Ergebnisse werden über den Index einsortiert),
+  damit `claim_idx` stabil bleibt und `ON CONFLICT (chapter_id, claim_idx)` bei jedem Lauf
+  denselben Claim trifft.
+- In den Logs trägt jede Zeile ein Label `[research N/M]` bzw. `[verify N/M]`, damit sich die
+  ineinander verschachtelten Ausgaben paralleler Claims auseinanderhalten lassen.
+
+### Suchfehler: kein Retry, einfach überspringen
+
+Frühere Versionen versuchten eine fehlgeschlagene Suchanfrage bis zu dreimal mit exponentiellem
+Backoff (0.5s, 1s, 2s) erneut. Das wurde entfernt:
+
+- Jede Suchanfrage wird **genau einmal** versucht. Schlägt sie fehl (keine Ergebnisse,
+  Verbindungsfehler, o. Ä.), wird sie übersprungen und mit den Ergebnissen der übrigen Anfragen
+  weitergemacht — keine Wartezeit, kein zweiter Versuch.
+- Grund: Bei einer rein I/O-/rate-limit-gebundenen, kostenlosen Such-API (DuckDuckGo über `ddgs`)
+  bringt Retry mit Backoff in der Praxis kaum Erfolg, verlangsamt aber den ganzen Kapitel-Lauf
+  spürbar (jeder Retry blockiert seinen Worker-Slot für die Backoff-Zeit).
+- Findet keine der Anfragen eines Claims Quellen, wird der Claim trotzdem gespeichert (als
+  `UNVERIFIABLE`), damit kein Claim verschwindet.
+
 ### Besonderheiten
 
 - Schreibt per `INSERT ... ON CONFLICT (chapter_id, claim_idx) DO UPDATE`. Ein erneuter Lauf
   überschreibt vorhandene Claims desselben Kapitels statt sie zu duplizieren.
-- Findet die Recherche keine Quellen, wird der Claim trotzdem gespeichert (als `UNVERIFIABLE`),
-  damit kein Claim verschwindet. Der LLM Judge wird in diesem Fall gar nicht erst aufgerufen.
-- Web-Suche läuft über ein konfigurierbares, festes Such-Backend (`search_backend`, Standard
-  `duckduckgo`) mit Timeout und Fail-Fast bei reinen Verbindungsfehlern (siehe `fact_checker_core.py`).
+- Der LLM Judge wird nur aufgerufen, wenn mindestens eine Quelle gefunden wurde — ohne Quellen
+  gibt es direkt `UNVERIFIABLE` ohne LLM-Aufruf.
+- Web-Suche läuft über ein konfigurierbares Such-Backend (`search_backend`, Standard
+  `duckduckgo`) mit Timeout (`search_timeout`).
 
 ---
 
@@ -116,11 +217,11 @@ flowchart TD
 
 ### Was wird auf welcher Ebene tatsächlich embedded?
 
-| Ebene (`level`) | Was wird embedded?                                          | Quellspalte           | Bedeutung                                                      |
-| --------------- | ----------------------------------------------------------- | ---------------------- | -------------------------------------------------------------- |
-| `chapter`       | Der volle Transkript-Text des Kapitels                      | `chapters.transcript` | Feinkörnigste Ebene, Inhalt eines einzelnen Kapitels           |
-| `episode`       | Die Episoden-Zusammenfassung (nicht das Rohtranskript)       | `episodes.summary`    | Setzt voraus, dass `text_summarizer` vorher gelaufen ist       |
-| `podcast`       | Der Podcast-Titel                                            | `podcasts.title`      | Gröbste Ebene, dient v. a. der groben thematischen Einordnung |
+| Ebene (`level`) | Was wird embedded?                                     | Quellspalte           | Bedeutung                                                     |
+| --------------- | ------------------------------------------------------ | --------------------- | ------------------------------------------------------------- |
+| `chapter`       | Der volle Transkript-Text des Kapitels                 | `chapters.transcript` | Feinkörnigste Ebene, Inhalt eines einzelnen Kapitels          |
+| `episode`       | Die Episoden-Zusammenfassung (nicht das Rohtranskript) | `episodes.summary`    | Setzt voraus, dass `text_summarizer` vorher gelaufen ist      |
+| `podcast`       | Der Podcast-Titel                                      | `podcasts.title`      | Gröbste Ebene, dient v. a. der groben thematischen Einordnung |
 
 Läuft `embedder` vor `text_summarizer` (oder ohne, dass je eine Summary
 existiert), gibt es auf Episoden-Ebene schlicht noch nichts zu embedden.
@@ -154,6 +255,20 @@ flowchart TD
     U2 --> DB
     U3 --> DB
 ```
+
+### Prompt-Strategie (Ausschnitt)
+
+Kein Chat-Prompt, sondern ein fester **Instruktions-Präfix** (`task_instruction`), der jedem zu
+embeddenden Text vorangestellt wird:
+
+```text
+Represent this podcast transcript segment for semantic retrieval: {text}
+```
+
+- Embedding-Modelle wie `qwen3-embedding` sind oft auf solche kurzen "Instruction"-Präfixe
+  trainiert, um den Einsatzzweck des Vektors zu steuern (hier: Retrieval statt z. B.
+  Klassifikation) — daher kein vollwertiger Prompt wie bei den LLM-Modulen.
+- Konfigurierbar über `task_instruction` in `transcript_embedder_config.json`, ohne Code-Änderung.
 
 ### Besonderheiten
 

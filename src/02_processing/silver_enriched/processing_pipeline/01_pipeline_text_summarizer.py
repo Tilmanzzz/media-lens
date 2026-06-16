@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -14,7 +14,7 @@ from common.app_logger import AppLogger
 from common.db_connector import DbConnector
 from silver_enriched.processing_pipeline.pipeline_utils import (
     LoadContext, build_pipeline_logger, fetch_chapter_ids_for_episode,
-    fetch_chunks, load_json_config, pipeline_batch_scope)
+    fetch_chunks, fetch_db_now, load_json_config, pipeline_batch_scope)
 from silver_enriched.text_summarizer.text_summarizer_core import TextSummarizer
 
 
@@ -235,7 +235,7 @@ def main() -> None:
         ctx = LoadContext(
             mode=args.mode,
             connector=connector,
-            processing_update_ts=datetime.now(timezone.utc),
+            processing_update_ts=fetch_db_now(conn),
             logger=logger,
             dry_run=args.dry_run,
         )

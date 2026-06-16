@@ -69,11 +69,16 @@ flowchart TD
 1. **Runner** (`00_pipeline_processing_runner.py`)
    - Einstiegspunkt für einen kompletten Lauf.
    - Parst CLI-Argumente (ggf. überschrieben durch `processing_pipeline_config.json`).
-   - Baut einen gemeinsamen Logger und eine Datenbank-Verbindung auf.
-   - Erzeugt einen `LoadContext` (Modus, Connector, gemeinsamer Zeitstempel, Logger, Dry-Run-Flag),
-     der an jeden Step weitergegeben wird.
-   - Lädt die gewünschten Step-Module dynamisch (`importlib`) und ruft pro Step `run_step(conn, ctx, args)` auf.
-   - Bei Fehlern: Rollback der Transaktion, danach wird die Exception erneut geworfen (kein "silent fail").
+   - Baut einen gemeinsamen Logger auf und erzeugt einen `LoadContext` (Modus, Connector,
+     gemeinsamer Zeitstempel, Logger, Dry-Run-Flag), der an jeden Step weitergegeben wird.
+   - Lädt die gewünschten Step-Module vorab im Hauptthread (`importlib`), damit die Importe nicht
+     nebenläufig laufen.
+   - Führt die Steps **parallel** über einen `ThreadPoolExecutor` aus (siehe
+     [Parallele Ausführung der Steps](#parallele-ausführung-der-steps)). Jeder Step bekommt seine
+     **eigene Datenbank-Verbindung** (`run_step(conn, ctx, args)`), da psycopg-Connections nicht
+     thread-sicher geteilt werden können.
+   - Bei Fehlern: Der Step rollt seine eigene Transaktion zurück; der Runner sammelt die Fehler
+     aller Steps und wirft danach den ersten erneut (kein "silent fail").
 
 2. **Steps** (`01_..._text_summarizer.py`, `02_..._fact_checker.py`, `03_..._embedder.py`, `04_..._emotion_scoring.py`)
    - Jeder Step kann auch eigenständig ausgeführt werden (eigene `main()`-Funktion + eigene CLI-Argumente).
@@ -85,22 +90,69 @@ flowchart TD
    - Reine fachliche Logik (LLM-Aufruf, Embedding-Berechnung, Audio-Analyse, ...).
    - Kennt die Datenbank nicht, sondern bekommt fertige Text-/Audio-Inputs und liefert Ergebnisse zurück.
 
+## Parallele Ausführung der Steps
+
+Der Runner führt die Steps nicht mehr streng nacheinander aus, sondern über einen
+`ThreadPoolExecutor`. Hintergrund: `text_summarizer`, `fact_checker` und `emotion_scoring` lesen
+verschiedene Quelltabellen und schreiben verschiedene Zieltabellen, es gibt also keinen
+Datenkonflikt. Zusätzlich ist `emotion_scoring` CPU/GPU-lastig (Wav2Vec2 + ffmpeg), die anderen
+beiden sind I/O-lastig (HTTP zu LLM/Web). Sie belasten unterschiedliche Ressourcen und überlappen
+sich daher gut.
+
+```mermaid
+flowchart TD
+    R[Runner] --> P{{ThreadPoolExecutor<br/>max_workers}}
+    P -->|parallel| TS[text_summarizer]
+    P -->|parallel| FC[fact_checker]
+    P -->|parallel| EM[emotion_scoring]
+    TS -.alle drei fertig.-> EB[embedder]
+    FC -.alle drei fertig.-> EB
+    EM -.alle drei fertig.-> EB
+```
+
+- **Parallel-Gruppe:** `text_summarizer`, `fact_checker`, `emotion_scoring` (Konstante
+  `PARALLEL_STEPS` im Runner).
+- **Abhängigkeit:** `embedder` braucht `episodes.summary` (von `text_summarizer`), startet aber
+  bewusst erst, wenn **alle drei** Steps der Parallel-Gruppe fertig sind — nicht nur
+  `text_summarizer`. Grund: `embedder` ruft Ollama (lokales Embedding-Modell) auf, das einen
+  eigenen Speicherblock braucht. Läuft er gleichzeitig mit `emotion_scoring` (lädt ein
+  Torch-Modell) und `fact_checker` (mehrere LLM-/Such-Threads), kann der Hauptspeicher knapp
+  werden und Ollamas `llama-server` mit einem Out-of-Memory-Fehler abbrechen. Indem `embedder`
+  wartet, bis die anderen drei ihren Speicher wieder freigegeben haben, läuft er praktisch
+  konkurrenzlos. Ist `text_summarizer` nicht Teil des Laufs, startet `embedder` sofort, sobald die
+  übrigen Steps fertig sind. Schlägt `text_summarizer` fehl, wird `embedder` übersprungen
+  (die anderen Steps dürfen trotzdem fehlschlagen, ohne `embedder` zu blockieren).
+- **Eigene Connection pro Step:** Jeder Step öffnet über den `DbConnector` seine eigene
+  Verbindung und verwaltet seine eigene Transaktion. Der gemeinsame `LoadContext` (inkl.
+  Zeitstempel und Logger) wird nur lesend geteilt; `args` wird pro Step kopiert (`copy.copy`),
+  damit das `stage`-Feld nicht zwischen Threads kollidiert.
+- **Worker-Zahl (`--max-workers` / `max_workers` in `processing_pipeline_config.json`):**
+  - Standard (`null`): automatisch so groß wie die Anzahl paralleler Steps (plus ein Slot für
+    `embedder`).
+  - Explizit gesetzt (z. B. `1`): begrenzt, wie viele Steps wirklich gleichzeitig laufen dürfen —
+    nützlich, wenn der Rechner bei voller Parallelität an Speichergrenzen stößt (z. B. wiederholte
+    Ollama-OOM-Fehler). `1` serialisiert alle Steps vollständig.
+
+> Hinweis: Innerhalb des `fact_checker` gibt es eine **zweite** Parallelisierungsebene — die
+> einzelnen Claims werden ebenfalls über einen Thread-Pool abgearbeitet
+> (siehe [04_modules.md](04_modules.md)).
+
 ## Ein Lauf von oben nach unten (Sequenzdiagramm)
 
 ```mermaid
 sequenceDiagram
     participant U as User/CLI
     participant R as Runner
-    participant S as Step
+    participant S as Step (eigene DB-Connection)
     participant PU as pipeline_utils
     participant DB as Datenbank
     participant M as Modul (z.B. FactChecker)
 
     U->>R: python 00_pipeline_processing_runner.py --mode delta --steps ...
-    R->>DB: Verbindung öffnen
-    R->>R: LoadContext erzeugen (ein Zeitstempel für den ganzen Lauf)
-    loop für jeden Step
-        R->>S: run_step(conn, ctx, args)
+    R->>R: Step-Module vorladen + LoadContext erzeugen (ein Zeitstempel für den ganzen Lauf)
+    par für jeden parallelen Step (eigener Thread)
+        R->>S: run_step(conn, ctx, args) auf eigener Connection
+        S->>DB: Verbindung öffnen
         S->>PU: pipeline_batch_scope(...) -> eigener Batch-Eintrag
         S->>PU: fetch_chunks(...) -> Delta- oder Full-Auswahl
         PU->>DB: SELECT ... (mit/ohne Delta-Filter)
@@ -110,7 +162,8 @@ sequenceDiagram
         S->>DB: UPDATE/INSERT Ergebnisse
         S->>DB: Batch als success/failed finalisieren
     end
-    R->>U: fertig (oder Exception bei Fehler)
+    Note over R,S: embedder startet erst, wenn text_summarizer, fact_checker und emotion_scoring alle fertig sind
+    R->>U: fertig (oder erster gesammelter Fehler)
 ```
 
 ## Warum diese Architektur?
@@ -119,9 +172,14 @@ sequenceDiagram
   anstoßen (z. B. nur `fact_checker` neu laufen lassen).
 - **Robustheit**: Jeder Step verwaltet seinen eigenen `pipeline_batches`-Eintrag. Ein
   fehlgeschlagener Step blockiert nicht automatisch die anderen, wenn man sie getrennt aufruft.
-- **Konsistenz im Runner-Lauf**: Der Runner erzeugt einen Zeitstempel (`processing_update_ts`)
-  zu Beginn, der für alle Schreibvorgänge dieses Laufs verwendet wird. So haben alle in einem
-  Lauf bearbeiteten Zeilen denselben Verarbeitungszeitpunkt.
+- **Konsistenz im Runner-Lauf**: Der Runner holt zu Beginn einmalig `SELECT NOW()` aus der
+  Datenbank (`fetch_db_now`, nicht die App-Uhr) und nutzt diesen einen Zeitstempel
+  (`processing_update_ts`) für alle Schreibvorgänge dieses Laufs. So haben alle in einem Lauf
+  bearbeiteten Zeilen denselben Verarbeitungszeitpunkt — auch über parallele Steps hinweg — und es
+  gibt keine Uhren-Drift zwischen App-Server und DB (siehe [02_load_strategy.md](02_load_strategy.md)).
+- **Parallelität ohne geteilten Zustand**: Weil jeder Step eine eigene DB-Connection und eine
+  eigene Transaktion hat und auf disjunkte Tabellen schreibt, lassen sich die Steps gefahrlos
+  parallel ausführen. Der gemeinsame `LoadContext` wird nur lesend geteilt.
 
 ## CLI-Einstiegspunkte (Übersicht)
 
