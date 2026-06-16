@@ -5,7 +5,6 @@ import importlib.util
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 SRC_DIR = str(Path(__file__).resolve()).split("src")[0] + "src\\02_processing"
 if str(SRC_DIR) not in sys.path:
@@ -13,8 +12,7 @@ if str(SRC_DIR) not in sys.path:
 
 from common.db_connector import DbConnector
 from silver_enriched.processing_pipeline.pipeline_utils import (
-    LoadContext, build_pipeline_logger, finalize_pipeline_batch,
-    load_json_config, start_pipeline_batch)
+    LoadContext, build_pipeline_logger, load_json_config)
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,8 +23,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run processing pipeline steps (full or delta).")
     parser.add_argument("--config", default="processing_pipeline_config.json", help="Path to pipeline args JSON config")
     parser.add_argument("--mode", choices=["full", "delta"], default="delta")
-    parser.add_argument("--stage", default="processing", help="pipeline_batches.stage for watermark lookup")
-    parser.add_argument("--watermark", default=None, help="ISO timestamp override for delta load")
     parser.add_argument("--batch-id", default=None, help="Optional batch UUID override")
     parser.add_argument(
         "--dry-run",
@@ -86,9 +82,8 @@ def main() -> None:
         log_file=args.log_file,
     )
     logger.info(
-        "pipeline: start mode=%s stage=%s dry_run=%s steps=%s batch_id=%s",
+        "pipeline: start mode=%s dry_run=%s steps=%s batch_id=%s",
         args.mode,
-        args.stage,
         args.dry_run,
         ",".join(sorted(steps)),
         args.batch_id or "-",
@@ -96,49 +91,28 @@ def main() -> None:
 
     connector = DbConnector()
     with connector.get_connection(logger=logger) as conn:
-        stage = args.stage or "processing"
-        load_mode = "full" if args.mode == "full" else "delta"
-        batch_id: Optional[str] = None
-
-        if args.dry_run:
-            logger.info("pipeline: dry run, skip batch write")
-            args.batch_id = None
-        else:
-            batch_id = args.batch_id or start_pipeline_batch(conn, stage, load_mode, logger=logger)
-            args.batch_id = batch_id
-            logger.info("pipeline: batch id=%s stage=%s load_mode=%s", batch_id, stage, load_mode)
-
         new_processing_update_ts = datetime.now(timezone.utc)
 
+        ctx = LoadContext(
+            mode=args.mode,
+            connector=connector,
+            processing_update_ts=new_processing_update_ts,
+            logger=logger,
+            dry_run=args.dry_run,
+        )
+
+        base_dir = Path(__file__).resolve().parent
+        step_map = {
+            "text_summarizer": base_dir / "01_pipeline_text_summarizer.py",
+            "fact_checker": base_dir / "02_pipeline_fact_checker.py",
+            "embedder": base_dir / "03_pipeline_embedder.py",
+            "emotion_scoring": base_dir / "04_pipeline_emotion_scoring.py",
+        }
+
+        if "processing" in steps:
+            steps = list(step_map.keys())
+
         try:
-            watermark = connector.parse_ts(args.watermark)
-            if args.mode == "delta" and watermark is None:
-                logger.info("watermark: resolve stage=%s", stage)
-                watermark = connector.get_watermark(conn, stage, logger=logger)
-
-            ctx = LoadContext(
-                mode=args.mode,
-                watermark=watermark,
-                connector=connector,
-                processing_update_ts=new_processing_update_ts,
-                logger=logger,
-                dry_run=args.dry_run,
-            )
-            logger.info("watermark: mode=%s watermark start=%s", args.mode, watermark)
-            if args.testing and args.test_end_watermark:
-                logger.info("watermark test_end=%s", args.test_end_watermark)
-
-            base_dir = Path(__file__).resolve().parent
-            step_map = {
-                "text_summarizer": base_dir / "01_pipeline_text_summarizer.py",
-                "fact_checker": base_dir / "02_pipeline_fact_checker.py",
-                "embedder": base_dir / "03_pipeline_embedder.py",
-                "emotion_scoring": base_dir / "04_pipeline_emotion_scoring.py",
-            }
-
-            if "processing" in steps:
-                steps = list(step_map.keys())
-
             for step in steps:
                 step_path = step_map.get(step)
                 if step_path is None:
@@ -148,21 +122,18 @@ def main() -> None:
                 if not hasattr(module, "run_step"):
                     raise RuntimeError(f"Step module missing run_step: {step_path}")
 
+                args.stage = step  # pipeline_batches.stage enum value matches the step name
                 logger.info("step: start %s", step)
                 module.run_step(conn, ctx, args)
                 logger.info("step: done %s", step)
 
-            if not args.dry_run and batch_id is not None:
-                finalize_pipeline_batch(conn, batch_id, "success", logger=logger)
-            logger.info("pipeline: done batch_id=%s", batch_id or "-")
+            logger.info("pipeline: done")
         except (KeyboardInterrupt, Exception):
             try:
                 conn.rollback()
             except Exception:
                 logger.exception("pipeline: rollback failed")
-            if not args.dry_run and batch_id is not None:
-                finalize_pipeline_batch(conn, batch_id, "failed", logger=logger)
-            logger.exception("pipeline: failed batch_id=%s", batch_id or "-")
+            logger.exception("pipeline: failed")
             raise
 
 

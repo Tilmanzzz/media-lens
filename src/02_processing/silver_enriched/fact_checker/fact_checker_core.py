@@ -59,6 +59,31 @@ def _dedupe_preserve_order(items: Iterable[str]) -> List[str]:
     return ordered
 
 
+_TRANSPORT_ERROR_HINTS = (
+    "error sending request",
+    "connection refused",
+    "connection reset",
+    "connection aborted",
+    "failed to lookup address",
+    "name resolution",
+    "name or service not known",
+    "tls",
+    "ssl",
+    "timed out",
+    "timeout",
+)
+
+
+def _is_transport_error(exc: Exception) -> bool:
+    """Detect low-level connection/transport failures (DNS, TLS, refused, timeout, ...).
+
+    These will not resolve by retrying the exact same request, unlike a transient
+    "no results" response from a single search backend.
+    """
+    message = str(exc).lower()
+    return any(hint in message for hint in _TRANSPORT_ERROR_HINTS)
+
+
 def _compact_sources(raw_results: Iterable[Dict[str, Any]], limit: int) -> List[Dict[str, str]]:
     compacted: List[Dict[str, str]] = []
     seen_urls = set()
@@ -246,7 +271,7 @@ class FactChecker:
     def _research_claims(self, claims: List[str]) -> Dict[str, List[Dict[str, str]]]:
         research_data: Dict[str, List[Dict[str, str]]] = {}
 
-        with DDGS() as ddgs:
+        with DDGS(timeout=self.config.search_timeout) as ddgs:
             for claim in claims:
                 self.logger.debug("Researching claim: %s", claim)
                 queries = self._generate_queries(claim)
@@ -260,6 +285,7 @@ class FactChecker:
                                 query,
                                 max_results=self.config.max_search_results_per_query,
                                 region=self.config.region,
+                                backend=self.config.search_backend,
                             )
                             raw_results.extend(list(result_iter))
                             break
@@ -267,6 +293,14 @@ class FactChecker:
                             message = str(exc)
                             if "No results found" in message:
                                 self.logger.warning("Search returned no results: %s", query)
+                                break
+
+                            if _is_transport_error(exc):
+                                self.logger.error(
+                                    "Search failed due to connection/transport error, no retry: %s | %s",
+                                    query,
+                                    message,
+                                )
                                 break
 
                             if attempt >= max_attempts:
@@ -282,7 +316,15 @@ class FactChecker:
                                 query,
                             )
                             time.sleep(backoff)
-                        except Exception:
+                        except Exception as exc:
+                            if _is_transport_error(exc):
+                                self.logger.error(
+                                    "Search failed due to connection/transport error, no retry: %s | %s",
+                                    query,
+                                    str(exc),
+                                )
+                                break
+
                             if attempt >= max_attempts:
                                 self.logger.exception("Search failed after retries: %s", query)
                                 break

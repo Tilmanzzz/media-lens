@@ -1,7 +1,5 @@
 {
   "mode": "delta",
-  "stage": "processing",
-  "watermark": null,
   "batch_id": null,
   "dry_run": false,
   "steps": "text_summarizer,fact_checker,embedder,emotion_scoring",

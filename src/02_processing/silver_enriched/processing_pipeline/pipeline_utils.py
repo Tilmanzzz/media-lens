@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, Iterator, List, Optional, Set
 
 from common.app_logger import AppLogger
 from common.db_connector import DbConnector
@@ -15,7 +16,6 @@ from common.db_connector import DbConnector
 class LoadContext:
     mode: str
     connector: DbConnector
-    watermark: Optional[datetime]
     processing_update_ts: Optional[datetime] = None
     logger: Optional[AppLogger] = None
     dry_run: bool = False
@@ -67,23 +67,20 @@ def _format_delta_debug(
     chunk_id = chunk.get("chapter_id") or chunk.get("transcript_line_id") or chunk.get("episode_id") or chunk.get("podcast_id")
     preprocessing_update_at = chunk.get("preprocessing_update_ts")
     processing_update_at = chunk.get("processing_update_ts")
-    watermark = ctx.watermark if ctx is not None else None
 
     if ctx is None or ctx.mode == "full":
         state = "full_load"
-    elif watermark is None:
-        state = "none_watermark"
     elif processing_update_at is None:
-        state = "none_update_at"
-    elif preprocessing_update_at is not None and watermark > preprocessing_update_at:
-        state = "watermark_gt_update_at"
+        state = "no_processing_ts"
+    elif preprocessing_update_at is not None and preprocessing_update_at > processing_update_at:
+        state = "preprocessing_gt_processing"
     else:
-        state = "update_at_gte_watermark"
+        state = "processing_gte_preprocessing"
 
     return (
         f"chunk={chunk_id} step={step} level={level} reason={state} "
         f"preprocessing_updated_at={preprocessing_update_at} processing_updated_at={processing_update_at} "
-        f"watermark_start={watermark} watermark_end={end_ts}"
+        f"test_end_ts={end_ts}"
     )
 
 
@@ -95,8 +92,8 @@ def _build_fetch_spec(step: str, level: Optional[str]) -> Dict[str, str]:
                 e.id AS episode_id,
                 ch.id AS chapter_id,
                 ch.transcript AS transcript_text
-                , ch.processing_updated_at AS processing_update_ts
                 , ch.preprocessing_updated_at AS preprocessing_update_ts
+                , ch.processing_updated_at AS processing_update_ts
             """,
             "from_sql": """
                 FROM chapters ch
@@ -105,6 +102,10 @@ def _build_fetch_spec(step: str, level: Optional[str]) -> Dict[str, str]:
             "order_by": "e.id, ch.chapter_idx",
             "preprocessing_ts": "ch.preprocessing_updated_at",
             "processing_ts": "ch.processing_updated_at",
+            "preprocessing_table": "chapters",
+            "preprocessing_column": "preprocessing_updated_at",
+            "processing_table": "chapters",
+            "processing_column": "processing_updated_at",
         }
 
     if step == "fact_checker":
@@ -127,6 +128,10 @@ def _build_fetch_spec(step: str, level: Optional[str]) -> Dict[str, str]:
             "preprocessing_ts": "ch.preprocessing_updated_at",
             "processing_ts": "MAX(fc.processing_updated_at)",
             "processing_ts_is_agg": "true",
+            "preprocessing_table": "chapters",
+            "preprocessing_column": "preprocessing_updated_at",
+            "processing_table": "fact_checked_claims",
+            "processing_column": "processing_updated_at",
         }
 
     if step == "emotion_scoring":
@@ -153,6 +158,10 @@ def _build_fetch_spec(step: str, level: Optional[str]) -> Dict[str, str]:
             "order_by": "e.id, ch.chapter_idx, tl.line_idx",
             "preprocessing_ts": "tl.preprocessing_updated_at",
             "processing_ts": "tl.processing_updated_at",
+            "preprocessing_table": "transcript_lines",
+            "preprocessing_column": "preprocessing_updated_at",
+            "processing_table": "transcript_lines",
+            "processing_column": "processing_updated_at",
         }
 
     if step == "embedding":
@@ -179,6 +188,11 @@ def _build_fetch_spec(step: str, level: Optional[str]) -> Dict[str, str]:
                 "preprocessing_ts": "ch.preprocessing_updated_at",
                 "processing_ts": "MAX(em.processing_updated_at)",
                 "processing_ts_is_agg": "true",
+                "preprocessing_table": "chapters",
+                "preprocessing_column": "preprocessing_updated_at",
+                "processing_table": "embeddings",
+                "processing_column": "processing_updated_at",
+                "processing_filter": "level = 'chapter'",
             }
 
         if level == "episode":
@@ -201,6 +215,11 @@ def _build_fetch_spec(step: str, level: Optional[str]) -> Dict[str, str]:
                 "preprocessing_ts": "e.preprocessing_updated_at",
                 "processing_ts": "MAX(em.processing_updated_at)",
                 "processing_ts_is_agg": "true",
+                "preprocessing_table": "episodes",
+                "preprocessing_column": "preprocessing_updated_at",
+                "processing_table": "embeddings",
+                "processing_column": "processing_updated_at",
+                "processing_filter": "level = 'episode'",
             }
 
         return {
@@ -222,9 +241,26 @@ def _build_fetch_spec(step: str, level: Optional[str]) -> Dict[str, str]:
             "preprocessing_ts": "p.preprocessing_updated_at",
             "processing_ts": "MAX(em.processing_updated_at)",
             "processing_ts_is_agg": "true",
+            "preprocessing_table": "podcasts",
+            "preprocessing_column": "preprocessing_updated_at",
+            "processing_table": "embeddings",
+            "processing_column": "processing_updated_at",
+            "processing_filter": "level = 'podcast'",
         }
 
     raise ValueError(f"Unsupported fetch step: {step}")
+
+
+def _fetch_target_watermark_value(conn, spec: Dict[str, str]) -> Any:
+    table = spec["processing_table"]
+    column = spec["processing_column"]
+    filter_sql = spec.get("processing_filter")
+    where_clause = f"WHERE {filter_sql}" if filter_sql else ""
+    sql = f"SELECT MAX({column}) FROM {table} {where_clause}"
+    with conn.cursor() as cur:
+        cur.execute(sql)
+        row = cur.fetchone()
+    return row[0] if row else None
 
 
 def fetch_chunks(
@@ -246,17 +282,18 @@ def fetch_chunks(
         params.append(list(ids))
 
     having_parts: List[str] = []
-    if ctx is not None and ctx.mode == "delta" and ctx.watermark is not None:
+    if ctx is not None and ctx.mode == "delta":
         processing_is_agg = spec.get("processing_ts_is_agg") == "true"
         target_parts = having_parts if processing_is_agg else where_parts
+        preprocessing_ts = spec["preprocessing_ts"]
+        processing_ts = spec["processing_ts"]
         if end_ts is None:
-            target_parts.append(f"({spec['preprocessing_ts']} > %s OR {spec['processing_ts']} IS NULL)")
-            params.append(ctx.watermark)
+            target_parts.append(f"({preprocessing_ts} > {processing_ts} OR {processing_ts} IS NULL)")
         else:
             target_parts.append(
-                f"(({spec['preprocessing_ts']} > %s AND {spec['preprocessing_ts']} <= %s) OR {spec['processing_ts']} IS NULL)"
+                f"(({preprocessing_ts} > {processing_ts} AND {preprocessing_ts} <= %s) OR {processing_ts} IS NULL)"
             )
-            params.extend([ctx.watermark, end_ts])
+            params.append(end_ts)
 
     where_clause = ""
     if where_parts:
@@ -280,14 +317,25 @@ def fetch_chunks(
 
     if logger is not None:
         logger.info(
-            "DB fetch start: step=%s level=%s mode=%s ids=%s watermark_start=%s watermark_end=%s",
+            "DB fetch start: step=%s level=%s mode=%s ids=%s test_end_ts=%s",
             step,
             level or "-",
             ctx.mode if ctx is not None else "full",
             len(ids) if ids is not None else "all",
-            ctx.watermark if ctx is not None else None,
             end_ts,
         )
+        if ctx is not None and ctx.mode == "delta":
+            target_watermark_value = _fetch_target_watermark_value(conn, spec)
+            logger.info(
+                "delta watermark check: step=%s level=%s source=%s.%s target=%s.%s target_current_max=%s",
+                step,
+                level or "-",
+                spec["preprocessing_table"],
+                spec["preprocessing_column"],
+                spec["processing_table"],
+                spec["processing_column"],
+                target_watermark_value,
+            )
 
     chunks: List[Dict[str, Any]] = []
     with conn.cursor() as cur:
@@ -361,3 +409,41 @@ def finalize_pipeline_batch(conn, batch_id: str, status: str, logger: Optional[l
     conn.commit()
     if logger is not None:
         logger.info("DB write done: pipeline_batch id=%s status=%s", batch_id, status)
+
+
+@contextmanager
+def pipeline_batch_scope(
+    conn,
+    stage: str,
+    load_mode: str,
+    batch_id: Optional[str],
+    dry_run: bool,
+    logger: Optional[logging.Logger] = None,
+) -> Iterator[Optional[str]]:
+    """Documents a step run in pipeline_batches; does not influence delta filtering.
+
+    If batch_id is already provided (e.g. via --batch-id), that batch is assumed to be
+    owned/finalized by the caller and is only used to tag rows.
+    """
+    owns_batch = batch_id is None and not dry_run
+    if owns_batch:
+        batch_id = start_pipeline_batch(conn, stage, load_mode, logger=logger)
+
+    try:
+        yield batch_id
+    except BaseException:
+        if owns_batch:
+            try:
+                conn.rollback()
+            except Exception:
+                if logger is not None:
+                    logger.exception("pipeline_batch: rollback failed")
+            try:
+                finalize_pipeline_batch(conn, batch_id, "failed", logger=logger)
+            except Exception:
+                if logger is not None:
+                    logger.exception("pipeline_batch: failed to finalize batch as failed")
+        raise
+    else:
+        if owns_batch:
+            finalize_pipeline_batch(conn, batch_id, "success", logger=logger)

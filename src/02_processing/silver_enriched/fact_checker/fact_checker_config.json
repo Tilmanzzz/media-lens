@@ -5,6 +5,8 @@
   "default_transcript_path": "test/fact_checker_test_transcript.txt",
   "default_output_path": "test/output_factchecker.json",
   "region": "us-en",
+  "search_backend": "duckduckgo",
+  "search_timeout": 10,
   "max_queries_per_claim": 1,
   "max_search_results_per_query": 3,
   "max_sources_per_claim": 3,

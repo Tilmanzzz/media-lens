@@ -22,6 +22,8 @@ class FactCheckerConfig:
     default_transcript_path: str = "test/fact_checker_test_transcript.txt"
     default_output_path: str = "test/output_factchecker.json"
     region: str = "us-en"
+    search_backend: str = "duckduckgo"
+    search_timeout: int = 10
     max_queries_per_claim: int = 3
     max_search_results_per_query: int = 2
     max_sources_per_claim: int = 5
@@ -59,6 +61,8 @@ class FactCheckerConfig:
             "default_transcript_path": self.default_transcript_path,
             "default_output_path": self.default_output_path,
             "region": self.region,
+            "search_backend": self.search_backend,
+            "search_timeout": self.search_timeout,
             "max_queries_per_claim": self.max_queries_per_claim,
             "max_search_results_per_query": self.max_search_results_per_query,
             "max_sources_per_claim": self.max_sources_per_claim,

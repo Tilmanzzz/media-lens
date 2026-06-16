@@ -98,7 +98,10 @@ CREATE TYPE public.pipeline_stage AS ENUM (
     'ingestion',
     'transcription',
     'segmenting',
-    'processing'
+    'text_summarizer',
+    'emotion_scoring',
+    'embedder',
+    'fact_checker'
 );
 
 
