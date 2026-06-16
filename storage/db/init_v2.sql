@@ -42,7 +42,6 @@ CREATE TABLE podcasts (
   batch_id            UUID        REFERENCES pipeline_batches(id) ON DELETE SET NULL,
   -- lastUpdateTime: The channel-level pubDate for the feed, if it’s sane.
   source_system_updated_at          TIMESTAMPTZ,
-  processing_updated_at TIMESTAMPTZ,
   preprocessing_updated_at TIMESTAMPTZ,
   ingestion_updated_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   max_episodes        INT DEFAULT NULL,
@@ -124,7 +123,7 @@ CREATE TABLE transcript_lines (
   end_time        REAL NOT NULL,
   text            TEXT NOT NULL,
   emotion         emotion_label DEFAULT 'neutral',
-  emotion_score   REAL,
+  emotion_score   REAL DEFAULT 0,
   batch_id        UUID          REFERENCES pipeline_batches(id) ON DELETE SET NULL,
   processing_updated_at TIMESTAMPTZ,
   preprocessing_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

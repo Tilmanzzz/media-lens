@@ -81,7 +81,9 @@ vom Runner aufgerufen werden.
 
 | Parameter                                             | Beispielwert                                   | Bedeutung                                                                                     |
 | ----------------------------------------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `model`                                               | `qwen3-embedding:4b`                           | Embedding-Modell (über Ollama)                                                                |
+| `provider`                                            | `ollama`                                       | `ollama` (lokal) oder `gemini` (Google Generative AI Embeddings, benötigt `GEMINI_API_KEY` in `.env`) |
+| `model`                                               | `qwen3-embedding:4b`                           | Embedding-Modell. Bei `provider: gemini` z. B. `gemini-embedding-001`                          |
+| `dimension`                                           | `2560`                                         | Erwartete Vektor-Länge. Bei `gemini` als `output_dimensionality` an die API übergeben. Stimmt die tatsächliche Modell-Ausgabe nicht damit überein, bricht der Lauf ab, statt eine zur Spalte `embeddings.embedding halfvec(2560)` inkompatible Zeile zu schreiben |
 | `task_instruction`                                    | "Represent this podcast transcript segment..." | Prompt-Präfix, das dem Modell den Anwendungsfall mitgibt                                      |
 | `input_text_field`                                    | `transcription`                                | Welches Feld im Input-Objekt den Text enthält (Fallbacks: `transcript_text`, `transcription`) |
 | `batch_size`                                          | `32`                                           | Wie viele Texte pro Embedding-Aufruf gebündelt werden                                         |
@@ -121,8 +123,8 @@ Je weiter rechts, desto höher die Priorität. Ein explizit auf der Kommandozeil
 Argument gewinnt immer.
 
 > **Modul- vs. Pipeline-Ebene auseinanderhalten:** `02_pipeline_fact_checker.py` lädt
-> `fact_checker_config.json` zusätzlich selbst über `FactChecker(config_path=...)` — unabhängig
-> davon, ob der Step über den Runner oder eigenständig aufgerufen wird. Dadurch bleiben
+> `fact_checker_config.json` zusätzlich selbst über `FactChecker(config_path=...)`, egal
+> ob der Step über den Runner oder eigenständig aufgerufen wird. Dadurch bleiben
 > fachliche Stellschrauben des Moduls (z. B. `max_chapter_workers`, `max_workers`) **nur** in der
 > Modul-Config einstellbar, während rein orchestrierungsbezogene Werte (z. B. `--max-workers` des
 > Runners) ausschließlich in `processing_pipeline_config.json` stehen.

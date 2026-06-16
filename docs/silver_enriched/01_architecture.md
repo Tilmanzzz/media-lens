@@ -105,23 +105,22 @@ flowchart TD
     P -->|parallel| TS[text_summarizer]
     P -->|parallel| FC[fact_checker]
     P -->|parallel| EM[emotion_scoring]
-    TS -.alle drei fertig.-> EB[embedder]
-    FC -.alle drei fertig.-> EB
-    EM -.alle drei fertig.-> EB
+    TS -->|episodes.summary fertig| EB[embedder]
+    P -.wartet auf text_summarizer.-> EB
 ```
 
 - **Parallel-Gruppe:** `text_summarizer`, `fact_checker`, `emotion_scoring` (Konstante
   `PARALLEL_STEPS` im Runner).
-- **Abhängigkeit:** `embedder` braucht `episodes.summary` (von `text_summarizer`), startet aber
-  bewusst erst, wenn **alle drei** Steps der Parallel-Gruppe fertig sind — nicht nur
-  `text_summarizer`. Grund: `embedder` ruft Ollama (lokales Embedding-Modell) auf, das einen
-  eigenen Speicherblock braucht. Läuft er gleichzeitig mit `emotion_scoring` (lädt ein
-  Torch-Modell) und `fact_checker` (mehrere LLM-/Such-Threads), kann der Hauptspeicher knapp
-  werden und Ollamas `llama-server` mit einem Out-of-Memory-Fehler abbrechen. Indem `embedder`
-  wartet, bis die anderen drei ihren Speicher wieder freigegeben haben, läuft er praktisch
-  konkurrenzlos. Ist `text_summarizer` nicht Teil des Laufs, startet `embedder` sofort, sobald die
-  übrigen Steps fertig sind. Schlägt `text_summarizer` fehl, wird `embedder` übersprungen
-  (die anderen Steps dürfen trotzdem fehlschlagen, ohne `embedder` zu blockieren).
+- **Abhängigkeit:** `embedder` braucht `episodes.summary` (von `text_summarizer`) und startet erst,
+  wenn `text_summarizer` fertig ist. Er läuft danach parallel zu den noch laufenden Steps
+  (`fact_checker`, `emotion_scoring`) weiter, die sind kein Hindernis. Ist `text_summarizer`
+  nicht Teil des Laufs, startet `embedder` sofort. Schlägt `text_summarizer` fehl, wird `embedder`
+  übersprungen.
+- **Hinweis Embedding-Provider:** Mit `provider: "gemini"` läuft das Embedding über eine
+  Remote-API und belastet den lokalen Speicher kaum, deshalb die parallele Ausführung. Mit
+  `provider: "ollama"` (lokales Modell) kann es bei gleichzeitig laufenden, speicherhungrigen
+  Steps (`emotion_scoring` lädt ein Torch-Modell) zu Speicherengpässen kommen. In dem Fall
+  `--max-workers` reduzieren (siehe unten).
 - **Eigene Connection pro Step:** Jeder Step öffnet über den `DbConnector` seine eigene
   Verbindung und verwaltet seine eigene Transaktion. Der gemeinsame `LoadContext` (inkl.
   Zeitstempel und Logger) wird nur lesend geteilt; `args` wird pro Step kopiert (`copy.copy`),
@@ -129,11 +128,11 @@ flowchart TD
 - **Worker-Zahl (`--max-workers` / `max_workers` in `processing_pipeline_config.json`):**
   - Standard (`null`): automatisch so groß wie die Anzahl paralleler Steps (plus ein Slot für
     `embedder`).
-  - Explizit gesetzt (z. B. `1`): begrenzt, wie viele Steps wirklich gleichzeitig laufen dürfen —
-    nützlich, wenn der Rechner bei voller Parallelität an Speichergrenzen stößt (z. B. wiederholte
+  - Explizit gesetzt (z. B. `1`): begrenzt, wie viele Steps wirklich gleichzeitig laufen dürfen.
+    Nützlich, wenn der Rechner bei voller Parallelität an Speichergrenzen stößt (z. B. wiederholte
     Ollama-OOM-Fehler). `1` serialisiert alle Steps vollständig.
 
-> Hinweis: Innerhalb des `fact_checker` gibt es eine **zweite** Parallelisierungsebene — die
+> Hinweis: Innerhalb des `fact_checker` gibt es eine **zweite** Parallelisierungsebene. Die
 > einzelnen Claims werden ebenfalls über einen Thread-Pool abgearbeitet
 > (siehe [04_modules.md](04_modules.md)).
 
@@ -162,7 +161,7 @@ sequenceDiagram
         S->>DB: UPDATE/INSERT Ergebnisse
         S->>DB: Batch als success/failed finalisieren
     end
-    Note over R,S: embedder startet erst, wenn text_summarizer, fact_checker und emotion_scoring alle fertig sind
+    Note over R,S: embedder startet, sobald text_summarizer fertig ist
     R->>U: fertig (oder erster gesammelter Fehler)
 ```
 
@@ -175,8 +174,8 @@ sequenceDiagram
 - **Konsistenz im Runner-Lauf**: Der Runner holt zu Beginn einmalig `SELECT NOW()` aus der
   Datenbank (`fetch_db_now`, nicht die App-Uhr) und nutzt diesen einen Zeitstempel
   (`processing_update_ts`) für alle Schreibvorgänge dieses Laufs. So haben alle in einem Lauf
-  bearbeiteten Zeilen denselben Verarbeitungszeitpunkt — auch über parallele Steps hinweg — und es
-  gibt keine Uhren-Drift zwischen App-Server und DB (siehe [02_load_strategy.md](02_load_strategy.md)).
+  bearbeiteten Zeilen denselben Verarbeitungszeitpunkt, auch über parallele Steps hinweg. Außerdem
+  gibt es keine Uhren-Drift zwischen App-Server und DB (siehe [02_load_strategy.md](02_load_strategy.md)).
 - **Parallelität ohne geteilten Zustand**: Weil jeder Step eine eigene DB-Connection und eine
   eigene Transaktion hat und auf disjunkte Tabellen schreibt, lassen sich die Steps gefahrlos
   parallel ausführen. Der gemeinsame `LoadContext` wird nur lesend geteilt.

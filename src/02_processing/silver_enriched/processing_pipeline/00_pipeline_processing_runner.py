@@ -146,10 +146,6 @@ def main() -> None:
             modules[step].run_step(conn, ctx, step_args)
             logger.info("step: done %s", step)
 
-    # text_summarizer, fact_checker and emotion_scoring read disjoint source tables
-    # and write disjoint targets, so they run concurrently. embedder needs
-    # episodes.summary, so it waits for text_summarizer before starting
-    # (see 02_load_strategy.md / 04_modules.md).
     parallel_steps = [s for s in steps if s in PARALLEL_STEPS]
     run_embedder = "embedder" in steps
     pool_size = args.max_workers or max(1, len(parallel_steps) + (1 if run_embedder else 0))
@@ -157,23 +153,22 @@ def main() -> None:
     errors = []
     with ThreadPoolExecutor(max_workers=pool_size) as executor:
         futures = {executor.submit(run_one, step): step for step in parallel_steps}
-        parallel_futures = list(futures.items())
+        summarizer_future = next(
+            (future for future, step in futures.items() if step == "text_summarizer"),
+            None,
+        )
 
         if run_embedder:
-            def run_embedder_after_others() -> None:
-                summarizer_ok = True
-                for future, step in parallel_futures:
+            def run_embedder_after_summary() -> None:
+                if summarizer_future is not None:
                     try:
-                        future.result()
+                        summarizer_future.result()
                     except Exception:
-                        if step == "text_summarizer":
-                            summarizer_ok = False
-                if not summarizer_ok:
-                    logger.error("embedder: skipped because text_summarizer failed")
-                    return
+                        logger.error("embedder: skipped because text_summarizer failed")
+                        return
                 run_one("embedder")
 
-            futures[executor.submit(run_embedder_after_others)] = "embedder"
+            futures[executor.submit(run_embedder_after_summary)] = "embedder"
 
         for future in as_completed(futures):
             step = futures[future]

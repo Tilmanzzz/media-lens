@@ -16,7 +16,7 @@ flowchart TD
 | -------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Text Summarizer**  | Fasst Kapitel- und Episoden-Transkripte automatisiert zusammen                                   | LLM via `provider` (z. B. `gemini-3.5-flash` oder lokal über `ollama`), zum Zusammenfassen                                                       |
 | **Fact Checker**     | Extrahiert Behauptungen aus dem Transkript, recherchiert sie im Web und bewertet sie mit Verdict | LLM via `provider` (`gemini`/`ollama`), je einmal zum Extrahieren, Suchanfragen generieren und Bewerten; dazu Web-Suche über `ddgs` (DuckDuckGo) |
-| **Embedder**         | Erzeugt Vektor-Embeddings auf Podcast-, Episoden- und Kapitel-Ebene für semantische Suche        | `qwen3-embedding:4b` über Ollama, reines Embedding-Modell, kein Chat/Reasoning                                                                   |
+| **Embedder**         | Erzeugt Vektor-Embeddings auf Podcast-, Episoden- und Kapitel-Ebene für semantische Suche        | Embedding-Modell via `provider` (`ollama` z. B. `qwen3-embedding:4b`, oder `gemini` z. B. `gemini-embedding-001`), reines Embedding-Modell, kein Chat/Reasoning |
 | **Emotion Analyser** | Klassifiziert die Emotion einzelner Transkript-Zeilen anhand des zugehörigen Audio-Ausschnitts   | `superb/wav2vec2-base-superb-er` (Hugging Face), Audio-Klassifikation, kein LLM                                                                  |
 
 ---
@@ -50,7 +50,7 @@ flowchart TD
 
 ### Prompt-Strategie (Ausschnitt)
 
-Zwei statische `PromptTemplate`s, kein System-Prompt — die Rolle steckt direkt im User-Prompt:
+Zwei feste `PromptTemplate`s, kein System-Prompt. Die Rolle steht direkt im User-Prompt:
 
 ```text
 # Kapitel-Prompt
@@ -67,9 +67,9 @@ Create:
 2. Key takeaways of the highlights (bullet list)
 ```
 
-- Bewusst **Freitext**, kein JSON-Schema (im Gegensatz zu `fact_checker`) — die Ausgabe landet
-  direkt in `chapters.summary` / `episodes.summary`.
-- `temperature: 0.0` — Zusammenfassungen sollen bei gleichem Input möglichst reproduzierbar sein.
+- Hier kommt **Freitext** raus, kein JSON-Schema (anders als beim `fact_checker`). Die Ausgabe
+  geht direkt in `chapters.summary` / `episodes.summary`.
+- `temperature: 0.0`, damit bei gleichem Input möglichst die gleiche Zusammenfassung rauskommt.
 
 ### Besonderheiten
 
@@ -123,8 +123,8 @@ flowchart TD
 
 ### Prompt-Strategie (Ausschnitt)
 
-Alle drei LLM-Rollen erzwingen striktes JSON als Ausgabe (kein Markdown, keine Erklärtexte) —
-nötig, weil die Antwort direkt weiterverarbeitet wird (`_parse_json`):
+Alle drei LLM-Rollen verlangen striktes JSON als Ausgabe (kein Markdown, keine Erklärtexte). Das
+ist nötig, weil die Antwort direkt weiterverarbeitet wird (`_parse_json`):
 
 ```text
 # LLM Claim Extractor (System-Prompt)
@@ -145,15 +145,15 @@ Return ONLY valid JSON with this schema:
 {"claim": "...", "verdict": "...", "explanation": "...", "sources": ["https://..."]}
 ```
 
-- **"Use ONLY the provided evidence"** ist die wichtigste Zeile im Judge-Prompt: verhindert, dass
-  das LLM aus seinem Trainingswissen heraus urteilt, statt anhand der tatsächlich gefundenen
-  Quellen — sonst wäre das Verdict nicht durch `sources` nachvollziehbar.
-- `allowed_verdicts` wird **dynamisch** in den System-Prompt eingesetzt, sodass eine Anpassung der
-  Config (z. B. zusätzliches Verdict) ohne Code-Änderung wirkt.
+- **"Use ONLY the provided evidence"** ist die wichtigste Zeile im Judge-Prompt. Sie verhindert,
+  dass das LLM aus seinem Trainingswissen urteilt statt anhand der gefundenen Quellen. Sonst wäre
+  das Verdict nicht durch `sources` nachvollziehbar.
+- `allowed_verdicts` wird **dynamisch** in den System-Prompt eingesetzt. So wirkt eine Änderung in
+  der Config (z. B. ein zusätzliches Verdict) ohne Code-Änderung.
 
 ### Parallelisierung: zwei Ebenen
 
-Es gibt **zwei verschachtelte** Thread-Pools — eine Ebene mehr als bei den anderen drei Modulen:
+Es gibt **zwei verschachtelte** Thread-Pools, also eine Ebene mehr als bei den anderen drei Modulen:
 
 ```mermaid
 flowchart TD
@@ -166,18 +166,19 @@ flowchart TD
 ```
 
 1. **Kapitel-Ebene** (`02_pipeline_fact_checker.py`, Step-Skript): mehrere Kapitel werden
-   gleichzeitig fact-checked, gesteuert über `max_chapter_workers` (Standard `2`,
-   **`fact_checker_config.json`**, nicht die Pipeline-Config — siehe [03_parameters.md](03_parameters.md)).
+   gleichzeitig fact-checked. Gesteuert über `max_chapter_workers` (Standard `2`). Dieser Wert
+   steht in der **`fact_checker_config.json`**, nicht in der Pipeline-Config (siehe
+   [03_parameters.md](03_parameters.md)).
 2. **Claim-Ebene** (`fact_checker_core.py`, Modul-Kern): innerhalb eines Kapitels sind die
-   einzelnen Claims voneinander unabhängig, deshalb laufen sowohl die Recherche
+   einzelnen Claims voneinander unabhängig. Deshalb laufen sowohl die Recherche
    (`_research_one_claim`) als auch die Bewertung (`_verify_one_claim`) über einen eigenen
    `ThreadPoolExecutor`, gesteuert über `max_workers` (Standard `4`). Effektiv wird
    `min(max_workers, Anzahl Claims)` genutzt. Die Arbeit ist I/O-lastig (HTTP zum LLM + Websuche),
-   daher bringen Threads trotz GIL einen echten Speedup.
+   deshalb bringen Threads trotz GIL einen echten Speedup.
 
 - **Worst-Case-Nebenläufigkeit:** `max_chapter_workers × max_workers` gleichzeitige
   Such-/LLM-Aufrufe (Standard: `2 × 4 = 8`). Bei Rate-Limit-Fehlern (HTTP 429, DuckDuckGo-Blocks)
-  einen der beiden Werte reduzieren — beide gehen multiplikativ in die Gesamtlast ein.
+  einen der beiden Werte reduzieren. Beide gehen multiplikativ in die Gesamtlast ein.
 - Jeder Recherche-Worker bekommt eine **eigene `DDGS`-Instanz** (DDGS ist nicht thread-sicher).
 - Die **Reihenfolge der Claims bleibt erhalten** (Ergebnisse werden über den Index einsortiert),
   damit `claim_idx` stabil bleibt und `ON CONFLICT (chapter_id, claim_idx)` bei jedem Lauf
@@ -191,11 +192,11 @@ Frühere Versionen versuchten eine fehlgeschlagene Suchanfrage bis zu dreimal mi
 Backoff (0.5s, 1s, 2s) erneut. Das wurde entfernt:
 
 - Jede Suchanfrage wird **genau einmal** versucht. Schlägt sie fehl (keine Ergebnisse,
-  Verbindungsfehler, o. Ä.), wird sie übersprungen und mit den Ergebnissen der übrigen Anfragen
-  weitergemacht — keine Wartezeit, kein zweiter Versuch.
-- Grund: Bei einer rein I/O-/rate-limit-gebundenen, kostenlosen Such-API (DuckDuckGo über `ddgs`)
-  bringt Retry mit Backoff in der Praxis kaum Erfolg, verlangsamt aber den ganzen Kapitel-Lauf
-  spürbar (jeder Retry blockiert seinen Worker-Slot für die Backoff-Zeit).
+  Verbindungsfehler usw.), wird sie übersprungen und mit den übrigen Anfragen weitergemacht. Keine
+  Wartezeit, kein zweiter Versuch.
+- Grund: Bei einer kostenlosen Such-API (DuckDuckGo über `ddgs`), die schnell rate-limitet, bringt
+  ein Retry mit Backoff in der Praxis kaum Erfolg. Er verlangsamt aber den ganzen Kapitel-Lauf
+  spürbar, weil jeder Retry seinen Worker-Slot für die Backoff-Zeit blockiert.
 - Findet keine der Anfragen eines Claims Quellen, wird der Claim trotzdem gespeichert (als
   `UNVERIFIABLE`), damit kein Claim verschwindet.
 
@@ -203,8 +204,8 @@ Backoff (0.5s, 1s, 2s) erneut. Das wurde entfernt:
 
 - Schreibt per `INSERT ... ON CONFLICT (chapter_id, claim_idx) DO UPDATE`. Ein erneuter Lauf
   überschreibt vorhandene Claims desselben Kapitels statt sie zu duplizieren.
-- Der LLM Judge wird nur aufgerufen, wenn mindestens eine Quelle gefunden wurde — ohne Quellen
-  gibt es direkt `UNVERIFIABLE` ohne LLM-Aufruf.
+- Der LLM Judge wird nur aufgerufen, wenn mindestens eine Quelle gefunden wurde. Ohne Quellen gibt
+  es direkt `UNVERIFIABLE`, ganz ohne LLM-Aufruf.
 - Web-Suche läuft über ein konfigurierbares Such-Backend (`search_backend`, Standard
   `duckduckgo`) mit Timeout (`search_timeout`).
 
@@ -229,7 +230,7 @@ existiert), gibt es auf Episoden-Ebene schlicht noch nichts zu embedden.
 |                 |                                                                                       |
 | --------------- | ------------------------------------------------------------------------------------- |
 | **Output**      | `embeddings` (Spalte `level` ∈ `podcast \| episode \| chapter`)                       |
-| **Modell**      | `qwen3-embedding:4b` über Ollama (kein LLM-Chat, sondern ein reines Embedding-Modell) |
+| **Modell**      | via `provider`: `ollama` (lokal, z. B. `qwen3-embedding:4b`) oder `gemini` (Google Generative AI Embeddings, z. B. `gemini-embedding-001`). Kein LLM-Chat, ein reines Embedding-Modell |
 | **Kern-Klasse** | `TranscriptEmbedder` (`transcript_embedder_core.py`)                                  |
 | **Config**      | `transcript_embedder_config.json`                                                     |
 
@@ -267,8 +268,23 @@ Represent this podcast transcript segment for semantic retrieval: {text}
 
 - Embedding-Modelle wie `qwen3-embedding` sind oft auf solche kurzen "Instruction"-Präfixe
   trainiert, um den Einsatzzweck des Vektors zu steuern (hier: Retrieval statt z. B.
-  Klassifikation) — daher kein vollwertiger Prompt wie bei den LLM-Modulen.
+  Klassifikation). Deshalb braucht es keinen vollwertigen Prompt wie bei den LLM-Modulen.
 - Konfigurierbar über `task_instruction` in `transcript_embedder_config.json`, ohne Code-Änderung.
+
+### Provider: `ollama` vs. `gemini`
+
+- `provider: "ollama"` (Standard): ruft `ollama.embed(model=...)` lokal auf. Erwartet einen
+  laufenden Ollama-Server mit dem konfigurierten Modell (z. B. `qwen3-embedding:4b`).
+- `provider: "gemini"`: nutzt `GoogleGenerativeAIEmbeddings` (`langchain-google-genai`) gegen die
+  Google-Generative-AI-API. Benötigt `GEMINI_API_KEY` in der `.env`-Datei im Projekt-Root
+  (gleiche Variable wie bei `text_summarizer`/`fact_checker`).
+- `dimension` steuert bei `gemini` den Parameter `output_dimensionality`. Modelle wie
+  `gemini-embedding-001` können verkürzte Ausgabedimensionen liefern. So lassen sich z. B. weiterhin
+  2560 Dimensionen erzeugen, damit es zur bestehenden Spalte `embeddings.embedding halfvec(2560)`
+  passt, ohne die DB-Spalte umbauen zu müssen.
+- Nach jedem Embedding-Aufruf wird die tatsächliche Vektor-Länge gegen `dimension` geprüft. Passt
+  sie nicht, bricht der Lauf sofort mit einem klaren Fehler ab, statt eine zur DB-Spalte
+  inkompatible Zeile einzufügen.
 
 ### Besonderheiten
 

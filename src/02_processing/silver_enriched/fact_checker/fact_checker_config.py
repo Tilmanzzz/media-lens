@@ -22,7 +22,7 @@ class FactCheckerConfig:
     default_transcript_path: str = "test/fact_checker_test_transcript.txt"
     default_output_path: str = "test/output_factchecker.json"
     region: str = "us-en"
-    search_backend: str = "duckduckgo"
+    search_backend: str = "duckduckgo,bing,brave,google,yahoo,mojeek,yandex,wikipedia"
     search_timeout: int = 10
     max_queries_per_claim: int = 3
     max_search_results_per_query: int = 2

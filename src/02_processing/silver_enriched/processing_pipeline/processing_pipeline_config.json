@@ -1,7 +1,7 @@
 {
   "mode": "delta",
   "batch_id": null,
-  "max_workers": 2,
+  "max_workers": 3,
   "dry_run": false,
   "steps": "text_summarizer,fact_checker,embedder,emotion_scoring",
   "testing": false,

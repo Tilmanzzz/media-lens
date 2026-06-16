@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import random
 import sys
 from collections import defaultdict
@@ -7,10 +8,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import ollama
+from dotenv import load_dotenv
 
 SRC_DIR = str(Path(__file__).resolve()).split("src")[0] + "src/02_processing"
 if str(SRC_DIR) not in sys.path:
     sys.path.append(str(SRC_DIR))
+
+load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 
 from common.app_logger import AppLogger
 
@@ -38,6 +42,30 @@ class TranscriptEmbedder:
             raise ValueError("batch_size must be greater than 0")
         if self.config.max_podcast_sample_size <= 0:
             raise ValueError("max_podcast_sample_size must be greater than 0")
+
+        self._gemini_embeddings = self._build_gemini_embeddings()
+
+    def _build_gemini_embeddings(self):
+        provider = (self.config.provider or "ollama").strip().lower()
+        if provider != "gemini":
+            return None
+
+        try:
+            from langchain_google_genai import \
+                GoogleGenerativeAIEmbeddings  # type: ignore[import-not-found]
+        except ImportError as exc:
+            raise ImportError("Missing dependency: langchain-google-genai") from exc
+
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY is not set in the environment")
+
+        return GoogleGenerativeAIEmbeddings(
+            model=self.config.model,
+            google_api_key=api_key,
+            output_dimensionality=self.config.dimension,
+            **self.config.embed_options,
+        )
 
     def _setup_logger(self, logging_enabled: Optional[bool], log_level: Optional[str]) -> None:
         enabled = self.config.logging_enabled if logging_enabled is None else logging_enabled
@@ -97,25 +125,43 @@ class TranscriptEmbedder:
     def _prompted_text(self, text: str) -> str:
         return f"{self.config.task_instruction} {text}".strip()
 
+    def _embed_batch_ollama(self, batch: List[str]) -> List[List[float]]:
+        response = ollama.embed(
+            model=self.config.model,
+            input=batch,
+            **self.config.embed_options,
+        )
+        embeddings = getattr(response, "embeddings", None)
+        if embeddings is None:
+            embeddings = response["embeddings"]
+        return embeddings
+
+    def _embed_batch_gemini(self, batch: List[str]) -> List[List[float]]:
+        return self._gemini_embeddings.embed_documents(batch)
+
     def _embed_texts(self, texts: List[str]) -> List[List[float]]:
         if not texts:
             return []
 
+        provider = (self.config.provider or "ollama").strip().lower()
         embeddings_out: List[List[float]] = []
         for start in range(0, len(texts), self.config.batch_size):
             batch = texts[start : start + self.config.batch_size]
-            response = ollama.embed(
-                model=self.config.model,
-                input=batch,
-                **self.config.embed_options,
-            )
-            embeddings = getattr(response, "embeddings", None)
-            if embeddings is None:
-                embeddings = response["embeddings"]
-            embeddings_out.extend(embeddings)
+            if provider == "gemini":
+                embeddings_out.extend(self._embed_batch_gemini(batch))
+            else:
+                embeddings_out.extend(self._embed_batch_ollama(batch))
 
         if len(embeddings_out) != len(texts):
             raise RuntimeError("Embedding count mismatch between input texts and output vectors")
+
+        if self.config.dimension and embeddings_out:
+            actual_dim = len(embeddings_out[0])
+            if actual_dim != self.config.dimension:
+                raise ValueError(
+                    f"Embedding dimension mismatch: configured dimension={self.config.dimension}, "
+                    f"model={self.config.model} returned {actual_dim}"
+                )
 
         return embeddings_out
 

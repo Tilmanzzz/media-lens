@@ -18,11 +18,13 @@ SRC_DIR = str(Path(__file__).resolve()).split("src")[0] + "src/02_processing"
 if str(SRC_DIR) not in sys.path:
     sys.path.append(str(SRC_DIR))
 
-load_dotenv(Path(__file__).resolve().parents[3] / ".env")
-
+load_dotenv(Path(__file__).resolve().parents[4] / ".env")
 from common.app_logger import AppLogger
 
-from .fact_checker_config import FactCheckerConfig
+try:
+    from .fact_checker_config import FactCheckerConfig
+except ImportError:
+    from fact_checker_config import FactCheckerConfig
 
 
 def _strip_code_fences(text: str) -> str:
