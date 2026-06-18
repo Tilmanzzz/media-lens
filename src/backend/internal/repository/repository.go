@@ -33,10 +33,14 @@ func (r *postgresEpisodeRepo) GetByID(ctx context.Context, id string) (*model.Ep
 		       e.published_at, e.duration_seconds,
 		       COALESCE(e.audio_key, ''), COALESCE(e.cover_key, ''),
 		       COALESCE(e.summary, ''), e.ingested_at,
-		       COALESCE(p.image_url, '')
+		       COALESCE(p.image_url, ''),
+		       (pb.stage = 'processing' AND pb.status IN ('success', 'consumed')) AS processing_complete
 		FROM episodes e
 		JOIN podcasts p ON p.id = e.podcast_id
+		JOIN pipeline_batches pb ON pb.id = e.batch_id
 		WHERE e.id = $1
+		  AND pb.stage IN ('transcription', 'segmenting', 'processing')
+		  AND pb.status IN ('success', 'consumed')
 	`, id)
 
 	ep, err := scanEpisode(row)
@@ -132,7 +136,7 @@ func scanEpisode(row *sql.Row) (*model.Episode, error) {
 	err := row.Scan(&ep.ID, &ep.Title, &ep.PodcastID, &ep.PodcastName,
 		&ep.PublishedAt, &durationSeconds,
 		&ep.AudioKey, &ep.CoverKey, &ep.Summary, &ep.IngestedAt,
-		&ep.PodcastImageURL)
+		&ep.PodcastImageURL, &ep.ProcessingComplete)
 	if err != nil {
 		return nil, err
 	}
