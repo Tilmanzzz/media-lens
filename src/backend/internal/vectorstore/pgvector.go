@@ -10,12 +10,13 @@ import (
 )
 
 type EpisodeHit struct {
-	EpisodeID       string  `json:"episode_id"`
-	Title           string  `json:"title"`
-	PodcastName     string  `json:"podcast_name"`
-	CoverKey        string  `json:"cover_key"`
-	PodcastImageURL string  `json:"-"`
-	Score           float64 `json:"score"`
+	EpisodeID          string  `json:"episode_id"`
+	Title              string  `json:"title"`
+	PodcastName        string  `json:"podcast_name"`
+	CoverKey           string  `json:"cover_key"`
+	PodcastImageURL    string  `json:"-"`
+	Score              float64 `json:"score"`
+	ProcessingComplete bool    `json:"processing_complete"`
 }
 
 type ChunkHit struct {
@@ -39,11 +40,15 @@ func (c *PgVectorClient) SearchEpisodes(ctx context.Context, vector []float64, l
 	rows, err := c.db.QueryContext(ctx, `
 		SELECT e.id, e.title, p.title, COALESCE(e.cover_key, ''),
 		       COALESCE(p.image_url, ''),
-		       1 - (emb.embedding <=> $1::halfvec) AS score
+		       1 - (emb.embedding <=> $1::halfvec) AS score,
+		       (pb.stage = 'processing' AND pb.status IN ('success', 'consumed')) AS processing_complete
 		FROM embeddings emb
 		JOIN episodes e ON e.id = emb.episode_id
 		JOIN podcasts p ON p.id = e.podcast_id
+		JOIN pipeline_batches pb ON pb.id = e.batch_id
 		WHERE emb.level = 'episode'
+		  AND pb.stage IN ('transcription', 'segmenting', 'processing')
+		  AND pb.status IN ('success', 'consumed')
 		  AND 1 - (emb.embedding <=> $1::halfvec) >= $2
 		ORDER BY emb.embedding <=> $1::halfvec
 		LIMIT $3`,
@@ -57,7 +62,7 @@ func (c *PgVectorClient) SearchEpisodes(ctx context.Context, vector []float64, l
 	var episodes []EpisodeHit
 	for rows.Next() {
 		var h EpisodeHit
-		if err := rows.Scan(&h.EpisodeID, &h.Title, &h.PodcastName, &h.CoverKey, &h.PodcastImageURL, &h.Score); err != nil {
+		if err := rows.Scan(&h.EpisodeID, &h.Title, &h.PodcastName, &h.CoverKey, &h.PodcastImageURL, &h.Score, &h.ProcessingComplete); err != nil {
 			return nil, fmt.Errorf("scan episode hit: %w", err)
 		}
 		episodes = append(episodes, h)
@@ -86,8 +91,12 @@ func (c *PgVectorClient) SearchChunks(ctx context.Context, vector []float64, epi
 		       1 - (emb.embedding <=> $1::halfvec) AS score
 		FROM embeddings emb
 		JOIN chapters ch ON ch.id = emb.chapter_id
+		JOIN episodes e ON e.id = ch.episode_id
+		JOIN pipeline_batches pb ON pb.id = e.batch_id
 		WHERE emb.level = 'chapter'
 		  AND ch.episode_id IN (%s)
+		  AND pb.stage IN ('transcription', 'segmenting', 'processing')
+		  AND pb.status IN ('success', 'consumed')
 		  AND 1 - (emb.embedding <=> $1::halfvec) >= $2
 		ORDER BY emb.embedding <=> $1::halfvec
 		LIMIT %s`,
