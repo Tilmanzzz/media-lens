@@ -1,6 +1,6 @@
 {
   "provider": "gemini",
-  "model": "gemini-2.5-flash",
+  "model": "gemini-2.5-flash-lite",
   "temperature": 0.0,
   "default_input_path": "./test/text_summarizer_test_input.json",
   "default_output_path": "./test/output_text_summarizer.json",

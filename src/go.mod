@@ -1,4 +1,4 @@
-module github.com/tilmanzzz/audio-lens
+module github.com/tilmanzzz/media-lens
 
 go 1.25.5
 

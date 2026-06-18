@@ -10,5 +10,8 @@
   "logging_enabled": true,
   "log_level": "INFO",
   "log_dir": "../logs",
-  "log_file": "emotion_analyser.log"
+  "log_file": "emotion_analyser.log",
+  "minio_bucket": "bronze",
+  "audio_cache_dir": "~/.audio_lens_cache/emotion_scoring",
+  "clear_cache_before_run": true
 }

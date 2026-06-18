@@ -1,12 +1,12 @@
 {
   "Servers": {
     "1": {
-      "Name": "audio-lens",
+      "Name": "media-lens",
       "Group": "Servers",
       "Host": "postgres",
       "Port": 5432,
-      "MaintenanceDB": "podcasts",
-      "Username": "admin",
+      "MaintenanceDB": "media_lens",
+      "Username": "postgres",
       "SSLMode": "prefer"
     }
   }

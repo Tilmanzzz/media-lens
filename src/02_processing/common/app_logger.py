@@ -57,3 +57,11 @@ class App_Logger:
 
 
 AppLogger = App_Logger
+
+
+def child_logger(parent: logging.Logger, name: str) -> logging.Logger:
+    child = logging.getLogger(f"{parent.name}.{name}")
+    child.setLevel(parent.level)
+    child.handlers.clear()
+    child.propagate = True
+    return child

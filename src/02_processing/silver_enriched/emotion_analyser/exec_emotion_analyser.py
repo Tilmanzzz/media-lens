@@ -24,9 +24,6 @@ def main() -> None:
 
     scorer = EmotionAnalyser(config=config)
 
-    # for item in scorer.available_emotions():
-    #     print("available emotion: %s", item)
-
     files_to_score = args.files or config.test_files
     if not files_to_score:
         raise ValueError("No input files provided and no test_files configured in config.")
@@ -44,3 +41,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    

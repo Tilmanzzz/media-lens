@@ -22,6 +22,9 @@ class EmotionConfig:
     log_level: str = "INFO"
     log_dir: str = "../logs"
     log_file: str = "emotion_analyser.log"
+    minio_bucket: str = "bronze"
+    audio_cache_dir: str = "~/.audio_lens_cache/emotion_scoring"
+    clear_cache_before_run: bool = False
 
     @classmethod
     def from_file(cls, config_path: str | Path) -> "EmotionConfig":
@@ -57,4 +60,7 @@ class EmotionConfig:
             "log_level": self.log_level,
             "log_dir": self.log_dir,
             "log_file": self.log_file,
+            "minio_bucket": self.minio_bucket,
+            "audio_cache_dir": self.audio_cache_dir,
+            "clear_cache_before_run": self.clear_cache_before_run,
         }

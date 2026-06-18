@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/mmcdole/gofeed"
-	"github.com/tilmanzzz/audio-lens/internal/go/blob"
-	"github.com/tilmanzzz/audio-lens/internal/go/db"
+	"github.com/tilmanzzz/media-lens/internal/go/blob"
+	"github.com/tilmanzzz/media-lens/internal/go/db"
 )
 
 // worker groups shared external clients

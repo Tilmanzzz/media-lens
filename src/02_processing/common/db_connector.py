@@ -47,27 +47,8 @@ class DbConnector:
                 return None
         return None
 
-    def get_watermark(self, conn: psycopg.Connection, stage: str, logger: Optional[Any] = None) -> datetime:
-        sql = (
-            "SELECT COALESCE(MAX(fin_ts), TIMESTAMPTZ '1970-01-01') "
-            "FROM pipeline_batches WHERE stage = %s AND status = 'success'"
-        )
-        if logger is not None:
-            logger.info("DB query start: watermark stage=%s", stage)
-        with conn.cursor() as cur:
-            cur.execute(sql, (stage,))
-            row = cur.fetchone()
-        watermark = datetime(1970, 1, 1, tzinfo=timezone.utc)
-        if row and row[0] is not None:
-            watermark = self.parse_ts(row[0]) or watermark
-        if logger is not None:
-            logger.info("DB query done: watermark stage=%s value=%s", stage, watermark)
-        return watermark
-
 
 if __name__ == "__main__":
     connector = DbConnector()
     with connector.get_connection() as conn:
         print("Connected to database successfully.")
-        watermark = connector.get_watermark(conn, "processing")
-        print("Current watermark for processing:", watermark)

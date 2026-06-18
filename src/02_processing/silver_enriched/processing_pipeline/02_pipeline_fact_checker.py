@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -15,7 +16,7 @@ from common.db_connector import DbConnector
 from silver_enriched.fact_checker.fact_checker_core import FactChecker
 from silver_enriched.processing_pipeline.pipeline_utils import (
     LoadContext, build_pipeline_logger, fetch_chapter_ids_for_episode,
-    fetch_chunks, load_json_config)
+    fetch_chunks, fetch_db_now, load_json_config, pipeline_batch_scope)
 
 
 def parse_args() -> argparse.Namespace:
@@ -26,8 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run fact_checker against chapter transcripts (full or delta).")
     parser.add_argument("--config", default="processing_pipeline_config.json", help="Path to pipeline args JSON config")
     parser.add_argument("--mode", choices=["full", "delta"], default="delta")
-    parser.add_argument("--stage", default="processing", help="pipeline_batches.stage for watermark lookup")
-    parser.add_argument("--watermark", default=None, help="ISO timestamp override for delta load")
+    parser.add_argument("--stage", default="fact_checker", help="pipeline_batches.stage tag (documentation only)")
     parser.add_argument("--batch-id", default=None, help="Batch UUID to store on writes")
     parser.add_argument(
         "--dry-run",
@@ -77,7 +77,6 @@ def upsert_fact_checked_claims(
     chapter_results: Iterable[Dict[str, Any]],
     batch_id: Optional[str],
     processing_update_ts: Optional[datetime],
-    logger=None,
 ) -> int:
     if processing_update_ts is None:
         raise ValueError("processing_update_ts is required for processing writes")
@@ -110,9 +109,6 @@ def upsert_fact_checked_claims(
                 )
             )
 
-    if logger is not None:
-        logger.info("DB write start: fact_checked_claims count=%d batch_id=%s", len(rows), batch_id or "-")
-
     sql = """
         INSERT INTO fact_checked_claims (
             chapter_id,
@@ -138,12 +134,8 @@ def upsert_fact_checked_claims(
     with conn.cursor() as cur:
         if rows:
             cur.executemany(sql, rows)
-        updated = len(rows)
 
-    if logger is not None:
-        logger.info("DB write done: fact_checked_claims rows=%d", updated)
-
-    return updated
+    return len(rows)
 
 
 def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
@@ -155,79 +147,93 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
         log_file=args.log_file,
     )
 
-    chapter_ids = None
-    end_ts = None
+    dry_run = args.dry_run or ctx.dry_run
+    with pipeline_batch_scope(conn, args.stage, ctx.mode, args.batch_id, dry_run, logger=logger) as batch_id:
+        chapter_ids = None
+        end_ts = None
 
-    if args.testing and args.test_end_watermark:
-        end_ts = ctx.connector.parse_ts(args.test_end_watermark)
+        if args.testing and args.test_end_watermark:
+            end_ts = ctx.connector.parse_ts(args.test_end_watermark)
 
-    if args.testing and args.test_episode_id:
-        chapter_ids = set(
-            fetch_chapter_ids_for_episode(
-                conn,
-                str(args.test_episode_id),
-                args.test_chapter_limit,
+        if args.testing and args.test_episode_id:
+            chapter_ids = set(
+                fetch_chapter_ids_for_episode(
+                    conn,
+                    str(args.test_episode_id),
+                    args.test_chapter_limit,
+                )
             )
+            if not chapter_ids:
+                logger.warning("fact_checker: no test chapters")
+                return
+
+        chunks = fetch_chunks(
+            conn,
+            step="fact_checker",
+            level="chapter",
+            ids=chapter_ids,
+            ctx=ctx,
+            end_ts=end_ts,
+            logger=logger,
         )
-        if not chapter_ids:
-            logger.warning("fact_checker: no test chapters")
+        if not chunks:
+            logger.warning("fact_checker: no chapters to process")
             return
 
-    chunks = fetch_chunks(
-        conn,
-        step="fact_checker",
-        level="chapter",
-        ids=chapter_ids,
-        ctx=ctx,
-        end_ts=end_ts,
-        logger=logger,
-    )
-    if not chunks:
-        logger.warning("fact_checker: no chunks")
-        return
+        logger.info("fact_checker: start mode=%s chapters=%d", ctx.mode, len(chunks))
 
-    logger.info("fact_checker: chunks=%d", len(chunks))
+        checker = FactChecker(
+            config_path="fact_checker_config.json",
+            logging_enabled=args.log_enabled,
+            log_level=args.log_level,
+        )
+        checker.logger = logger
 
-    checker = FactChecker(logging_enabled=args.log_enabled, log_level=args.log_level)
-    checker.logger = logger
+        def process_chunk(chunk: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+            transcript = str(chunk.get("transcript_text") or "").strip()
+            chapter_id = chunk.get("chapter_id")
+            if not chapter_id or not transcript:
+                return None
 
-    chapter_results: List[Dict[str, Any]] = []
-    for chunk in chunks:
-        transcript = str(chunk.get("transcript_text") or "").strip()
-        chapter_id = chunk.get("chapter_id")
-        if not chapter_id or not transcript:
-            continue
+            logger.debug("fact_checker: checking chapter_id=%s", chapter_id)
+            result = checker.fact_check(transcript)
+            claims = result.get("claims") if isinstance(result, dict) else []
+            if not isinstance(claims, list):
+                claims = []
+            logger.info("fact_checker: chapter done chapter_id=%s claims=%d", chapter_id, len(claims))
+            return {"chapter_id": chapter_id, "claims": claims}
 
-        logger.info("fact_checker: start chapter_id=%s", chapter_id)
-        result = checker.fact_check(transcript)
-        claims = result.get("claims") if isinstance(result, dict) else []
-        if not isinstance(claims, list):
-            claims = []
-        chapter_results.append({"chapter_id": chapter_id, "claims": claims})
-        logger.info("fact_checker: done chapter_id=%s claims=%d", chapter_id, len(claims))
+        max_chapter_workers = max(1, min(checker.config.max_chapter_workers, len(chunks)))
+        with ThreadPoolExecutor(max_workers=max_chapter_workers) as executor:
+            chapter_results = [
+                result for result in executor.map(process_chunk, chunks) if result is not None
+            ]
 
-    if not chapter_results:
-        logger.warning("fact_checker: no claims")
-        return
+        if not chapter_results:
+            logger.warning("fact_checker: no claims extracted from any chapter")
+            return
 
-    total_claims = sum(len(item.get("claims") or []) for item in chapter_results)
-    logger.info("fact_checker: chapter_results=%d claims=%d", len(chapter_results), total_claims)
+        total_claims = sum(len(item.get("claims") or []) for item in chapter_results)
+        logger.info(
+            "fact_checker: extracted claims=%d from chapters=%d",
+            total_claims, len(chapter_results),
+        )
 
-    if args.dry_run or ctx.dry_run:
-        logger.info("fact_checker: dry run, skip writes")
-        return
+        if dry_run:
+            logger.info("fact_checker: dry run, skipping writes")
+            return
 
-    total_updates = upsert_fact_checked_claims(
-        conn,
-        chapter_results,
-        args.batch_id,
-        ctx.processing_update_ts,
-        logger=logger,
-    )
-    logger.info("DB commit start: fact_checker rows=%d", total_updates)
-    conn.commit()
-    logger.info("DB commit done: fact_checker rows=%d", total_updates)
-    logger.info("fact_checker: done rows=%d", total_updates)
+        total_updates = upsert_fact_checked_claims(
+            conn,
+            chapter_results,
+            batch_id,
+            ctx.processing_update_ts,
+        )
+        conn.commit()
+        logger.info(
+            "fact_checker: done claims=%d batch_id=%s",
+            total_updates, batch_id or "-",
+        )
 
 
 def main() -> None:
@@ -243,17 +249,10 @@ def main() -> None:
     ).build()
 
     with connector.get_connection(logger=logger) as conn:
-        watermark = connector.parse_ts(args.watermark)
-        if args.mode == "delta":
-            if watermark is None:
-                logger.info("watermark: resolve stage=%s", args.stage)
-                watermark = connector.get_watermark(conn, args.stage, logger=logger)
-        logger.info("watermark: mode=%s value=%s", args.mode, watermark)
         ctx = LoadContext(
             mode=args.mode,
-            watermark=watermark,
             connector=connector,
-            processing_update_ts=datetime.now(timezone.utc),
+            processing_update_ts=fetch_db_now(conn),
             logger=logger,
             dry_run=args.dry_run,
         )

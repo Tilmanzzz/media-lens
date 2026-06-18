@@ -9,7 +9,7 @@ from typing import Any, Dict
 @dataclass(slots=True)
 class TextSummarizerConfig:
     provider: str = "gemini"
-    model: str = "gemini-2.5-flash"
+    model: str = "gemini-2.5-flash-lite"
     temperature: float = 0.0
     default_input_path: str = "text_summarizer_test_input.json"
     default_output_path: str = "output_text_summarizer.json"

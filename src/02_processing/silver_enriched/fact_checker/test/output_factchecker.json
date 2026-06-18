@@ -1,53 +1,32 @@
 {
   "claims": [
     {
-      "claim": "Jupiter is the largest planet in our solar system",
-      "verdict": "TRUE",
-      "explanation": "According to the provided sources, Jupiter has the largest diameter (11 times that of Earth) and the greatest mass (71% of the total) among the planets in our solar system.",
+      "claim": "Jupiter is the largest planet in our solar system and has 95 officially recognized moons.",
+      "verdict": "FALSE",
+      "explanation": "According to the provided evidence, Jupiter has 101 officially recognized moons as of March 2026, not 95. Additionally, the provided sources do not contain any information to verify if Jupiter is the largest planet in our solar system.",
       "sources": [
-        "https://en.wikipedia.org/wiki/Jupiter",
-        "https://en.wikipedia.org/wiki/List_of_Solar_System_objects_by_size",
-        "https://www.britannica.com/science/How-Big-Is-Jupiter"
-      ]
-    },
-    {
-      "claim": "Jupiter has 95 officially recognized moons",
-      "verdict": "MOSTLY_TRUE",
-      "explanation": "According to the Wikipedia article, as of March 16, 2026, there were 101 known moons. The Science@NASA website states Jupiter has between 80 and 95 moons. The Britannica article confirms 95 known moons as of 2023. Therefore, 95 is a reasonable figure, though the total number is subject to change.",
-      "sources": [
-        "https://en.wikipedia.org/wiki/Moons_of_Jupiter",
         "https://science.nasa.gov/jupiter/jupiter-moons/",
-        "https://www.britannica.com/topic/moons-of-Jupiter-2236909"
+        "https://science.nasa.gov/jupiter/"
       ]
     },
     {
-      "claim": "The Great Red Spot is a persistent high-pressure region in Jupiter's atmosphere",
-      "verdict": "MOSTLY_TRUE",
-      "explanation": "According to NASA and Universe Today, the Great Red Spot is a high-pressure region that generates an anticyclone. It rotates in the opposite sense of hurricanes on Earth and is 16,000 km wide. However, the evidence doesn't explicitly state that it is *persistent*.",
-      "sources": [
-        "https://www.nasa.gov/centers-and-facilities/goddard/jupiters-great-red-spot-a-swirling-mystery/",
-        "https://skyandtelescope.org/observing/interactive-sky-watching-tools/transit-times-of-jupiters-great-red-spot/",
-        "https://www.universetoday.com/articles/why-is-jupiters-great-red-spot-shrinking-its-starving"
-      ]
-    },
-    {
-      "claim": "The Great Red Spot has been observed for over 150 years",
+      "claim": "The Great Red Spot is a persistent high-pressure region in Jupiter's atmosphere, producing an anticyclonic storm observed by humans for over 150 years.",
       "verdict": "TRUE",
-      "explanation": "According to the provided sources, astronomers have observed the Great Red Spot for at least 150 years, with observations dating back to 1831 and continuing to the present.",
+      "explanation": "The provided evidence confirms that the Great Red Spot is a persistent high-pressure region in Jupiter's atmosphere that produces an anticyclonic storm. It has been observed for at least 150 years, with some sources noting it has been raging for hundreds of years.",
       "sources": [
         "https://en.wikipedia.org/wiki/Great_Red_Spot",
-        "https://skyandtelescope.org/astronomy-news/how-long-has-jupiters-great-red-spot-really-been-around/",
-        "https://science.nasa.gov/missions/hubble/nasas-hubble-watches-jupiters-great-red-spot-behave-like-a-stress-ball/"
+        "https://newspaceeconomy.ca/2025/10/15/what-is-jupiters-great-red-spot/",
+        "https://www.space.com/jupiter-great-red-spot.html"
       ]
     },
     {
-      "claim": "The global average temperature has risen by approximately 1.1 degrees Celsius compared to pre-industrial levels",
-      "verdict": "TRUE",
-      "explanation": "According to the Wikipedia article and the Copernicus Climate Change Service, the global average temperature has risen by 1.1°C (2.0°F) relative to pre-industrial levels.",
+      "claim": "The global average temperature has risen by approximately 1.1 degrees Celsius compared to pre-industrial levels.",
+      "verdict": "UNVERIFIABLE",
+      "explanation": "The provided evidence does not contain any information to verify or refute the claim that the global average temperature has risen by approximately 1.1 degrees Celsius compared to pre-industrial levels.",
       "sources": [
-        "https://en.wikipedia.org/wiki/Global_surface_temperature",
-        "https://climate.copernicus.eu/copernicus-2024-first-year-exceed-15degc-above-pre-industrial-level",
-        "https://www.climate.gov/news-features/understanding-climate/climate-change-global-temperature"
+        "https://www.ghlands.org/2026/06/un-report-warns-of-near-record-global.html",
+        "https://wmo.int/news/media-centre/new-climate-predictions-increase-likelihood-of-temporarily-reaching-15-degc-next-5-years",
+        "https://sj.jst.go.jp/stories/2023/s0531-01p.html"
       ]
     }
   ]

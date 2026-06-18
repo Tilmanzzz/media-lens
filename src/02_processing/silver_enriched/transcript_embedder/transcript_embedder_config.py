@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 
 @dataclass(slots=True)
 class TranscriptEmbedderConfig:
+    provider: str = "ollama"
     model: str = "qwen3-embedding:4b"
+    dimension: Optional[int] = 2560
     task_instruction: str = "Represent this podcast transcript segment for semantic retrieval:"
     input_text_field: str = "transcription"
     batch_size: int = 32
@@ -44,7 +46,9 @@ class TranscriptEmbedderConfig:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "provider": self.provider,
             "model": self.model,
+            "dimension": self.dimension,
             "task_instruction": self.task_instruction,
             "input_text_field": self.input_text_field,
             "batch_size": self.batch_size,
