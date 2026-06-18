@@ -68,7 +68,13 @@ export default async function SearchPage({
                   className="flex flex-col gap-4 bg-background-card hover:bg-background-raised border border-border rounded-xl p-5 transition-colors"
                 >
                   <div className="relative w-24 h-24 rounded-lg overflow-hidden shrink-0">
-                    <Image src={topResult.cover_url} alt={topResult.title} fill className="object-cover" />
+                    {topResult.cover_url ? (
+                      <Image src={topResult.cover_url} alt={topResult.title} fill className="object-cover" />
+                    ) : (
+                      <div className="w-full h-full bg-background-card flex items-center justify-center">
+                        <span className="text-foreground-subtle text-xs">Kein Cover</span>
+                      </div>
+                    )}
                   </div>
                   <div>
                     <p className="text-lg font-semibold text-foreground line-clamp-2">{topResult.title}</p>
@@ -94,7 +100,13 @@ export default async function SearchPage({
                           ▶
                         </span>
                         <div className="relative w-12 h-12 rounded overflow-hidden shrink-0">
-                          <Image src={ep.cover_url} alt={ep.title} fill className="object-cover" />
+                          {ep.cover_url ? (
+                            <Image src={ep.cover_url} alt={ep.title} fill className="object-cover" />
+                          ) : (
+                            <div className="w-full h-full bg-background-card flex items-center justify-center">
+                              <span className="text-foreground-subtle text-[10px]">Kein Cover</span>
+                            </div>
+                          )}
                         </div>
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-foreground truncate">{ep.title}</p>
@@ -123,7 +135,13 @@ export default async function SearchPage({
                     className="grid grid-cols-[48px_1fr_auto] items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-background-card transition-colors group"
                   >
                     <div className="relative w-12 h-12 rounded overflow-hidden shrink-0">
-                      <Image src={ep.cover_url} alt={ep.title} fill className="object-cover" />
+                      {ep.cover_url ? (
+                        <Image src={ep.cover_url} alt={ep.title} fill className="object-cover" />
+                      ) : (
+                        <div className="w-full h-full bg-background-card flex items-center justify-center">
+                          <span className="text-foreground-subtle text-[10px]">Kein Cover</span>
+                        </div>
+                      )}
                     </div>
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-foreground truncate">{ep.title}</p>
@@ -150,12 +168,18 @@ export default async function SearchPage({
                     className="flex flex-col gap-2 group"
                   >
                     <div className="relative w-full aspect-square rounded-lg overflow-hidden">
-                      <Image
-                        src={p.cover_url}
-                        alt={p.podcast_name}
-                        fill
-                        className="object-cover group-hover:opacity-80 transition-opacity"
-                      />
+                      {p.cover_url ? (
+                        <Image
+                          src={p.cover_url}
+                          alt={p.podcast_name}
+                          fill
+                          className="object-cover group-hover:opacity-80 transition-opacity"
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-background-card flex items-center justify-center">
+                          <span className="text-foreground-subtle text-xs">Kein Cover</span>
+                        </div>
+                      )}
                     </div>
                     <p className="text-sm font-medium text-foreground truncate">{p.podcast_name}</p>
                     <p className="text-xs text-foreground-subtle">Podcast</p>

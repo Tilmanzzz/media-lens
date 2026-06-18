@@ -72,13 +72,19 @@ export default async function PodcastDetail({ params }: { params: Promise<{ id: 
 
       <div className="flex rounded-xl">
         <div className="w-full max-w-lg self-center rounded-2xl mb-8">
-          <Image
-            src={episode.cover_url}
-            alt={episode.title}
-            width={400}
-            height={400}
-            className="object-cover"
-          />
+          {episode.cover_url ? (
+            <Image
+              src={episode.cover_url}
+              alt={episode.title}
+              width={400}
+              height={400}
+              className="object-cover"
+            />
+          ) : (
+            <div className="w-[400px] h-[400px] rounded-2xl bg-background-card flex items-center justify-center">
+              <span className="text-foreground-subtle text-sm">Kein Cover</span>
+            </div>
+          )}
         </div>
         <div className="w-full max-w-1xl flex flex-col mb-8 gap-4">
           <p className="text-sm text-gray-500 uppercase tracking-widest">
