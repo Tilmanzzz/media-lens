@@ -77,7 +77,6 @@ def upsert_fact_checked_claims(
     chapter_results: Iterable[Dict[str, Any]],
     batch_id: Optional[str],
     processing_update_ts: Optional[datetime],
-    logger=None,
 ) -> int:
     if processing_update_ts is None:
         raise ValueError("processing_update_ts is required for processing writes")
@@ -110,9 +109,6 @@ def upsert_fact_checked_claims(
                 )
             )
 
-    if logger is not None:
-        logger.info("DB write start: fact_checked_claims count=%d batch_id=%s", len(rows), batch_id or "-")
-
     sql = """
         INSERT INTO fact_checked_claims (
             chapter_id,
@@ -138,12 +134,8 @@ def upsert_fact_checked_claims(
     with conn.cursor() as cur:
         if rows:
             cur.executemany(sql, rows)
-        updated = len(rows)
 
-    if logger is not None:
-        logger.info("DB write done: fact_checked_claims rows=%d", updated)
-
-    return updated
+    return len(rows)
 
 
 def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
@@ -185,10 +177,10 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
             logger=logger,
         )
         if not chunks:
-            logger.warning("fact_checker: no chunks")
+            logger.warning("fact_checker: no chapters to process")
             return
 
-        logger.info("fact_checker: chunks=%d", len(chunks))
+        logger.info("fact_checker: start mode=%s chapters=%d", ctx.mode, len(chunks))
 
         checker = FactChecker(
             config_path="fact_checker_config.json",
@@ -203,12 +195,12 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
             if not chapter_id or not transcript:
                 return None
 
-            logger.info("fact_checker: start chapter_id=%s", chapter_id)
+            logger.debug("fact_checker: checking chapter_id=%s", chapter_id)
             result = checker.fact_check(transcript)
             claims = result.get("claims") if isinstance(result, dict) else []
             if not isinstance(claims, list):
                 claims = []
-            logger.info("fact_checker: done chapter_id=%s claims=%d", chapter_id, len(claims))
+            logger.info("fact_checker: chapter done chapter_id=%s claims=%d", chapter_id, len(claims))
             return {"chapter_id": chapter_id, "claims": claims}
 
         max_chapter_workers = max(1, min(checker.config.max_chapter_workers, len(chunks)))
@@ -218,14 +210,17 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
             ]
 
         if not chapter_results:
-            logger.warning("fact_checker: no claims")
+            logger.warning("fact_checker: no claims extracted from any chapter")
             return
 
         total_claims = sum(len(item.get("claims") or []) for item in chapter_results)
-        logger.info("fact_checker: chapter_results=%d claims=%d", len(chapter_results), total_claims)
+        logger.info(
+            "fact_checker: extracted claims=%d from chapters=%d",
+            total_claims, len(chapter_results),
+        )
 
         if dry_run:
-            logger.info("fact_checker: dry run, skip writes")
+            logger.info("fact_checker: dry run, skipping writes")
             return
 
         total_updates = upsert_fact_checked_claims(
@@ -233,12 +228,12 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
             chapter_results,
             batch_id,
             ctx.processing_update_ts,
-            logger=logger,
         )
-        logger.info("DB commit start: fact_checker rows=%d", total_updates)
         conn.commit()
-        logger.info("DB commit done: fact_checker rows=%d", total_updates)
-        logger.info("fact_checker: done rows=%d", total_updates)
+        logger.info(
+            "fact_checker: done claims=%d batch_id=%s",
+            total_updates, batch_id or "-",
+        )
 
 
 def main() -> None:

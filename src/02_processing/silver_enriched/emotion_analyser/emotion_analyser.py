@@ -123,10 +123,19 @@ class EmotionAnalyser:
         self.logger.error("Unsupported audio format: %s", suffix)
         raise ValueError(f"Unsupported audio format '{suffix}'. Use .wav or .m4a")
 
+    # Wav2Vec2's first conv layer has kernel_size=10; require at least 400 samples
+    _MIN_SAMPLES = 400
+
     def score_audio(self, path: Union[str, Path]) -> Dict[str, Union[str, int, float]]:
         self.logger.info("Scoring audio file: %s", path)
         wav_path = self.prepare_audio(path)
         speech_array, _ = librosa.load(str(wav_path), sr=self.config.sample_rate)
+
+        if len(speech_array) < self._MIN_SAMPLES:
+            raise ValueError(
+                f"Audio segment too short for emotion scoring: {len(speech_array)} samples "
+                f"(minimum {self._MIN_SAMPLES}). File: {wav_path}"
+            )
 
         inputs = self.feature_extractor(
             speech_array,

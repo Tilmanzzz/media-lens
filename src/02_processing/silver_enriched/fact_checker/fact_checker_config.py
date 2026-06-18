@@ -17,7 +17,7 @@ DEFAULT_ALLOWED_VERDICTS = [
 @dataclass(slots=True)
 class FactCheckerConfig:
     provider: str = "gemini"
-    model: str = "gemini-3.5-flash"
+    model: str = "gemini-2.5-flash-lite"
     temperature: float = 0.0
     default_transcript_path: str = "test/fact_checker_test_transcript.txt"
     default_output_path: str = "test/output_factchecker.json"

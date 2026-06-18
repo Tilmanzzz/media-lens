@@ -60,17 +60,12 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args(remaining)
 
 
-def _fetch_podcast_id_for_episode(conn, episode_id: str, logger=None) -> Optional[str]:
+def _fetch_podcast_id_for_episode(conn, episode_id: str) -> Optional[str]:
     sql = "SELECT podcast_id FROM episodes WHERE id = %s"
-    if logger is not None:
-        logger.info("DB query start: podcast_id episode=%s", episode_id)
     with conn.cursor() as cur:
         cur.execute(sql, (episode_id,))
         row = cur.fetchone()
-    podcast_id = str(row[0]) if row and row[0] is not None else None
-    if logger is not None:
-        logger.info("DB query done: podcast_id episode=%s podcast_id=%s", episode_id, podcast_id or "-")
-    return podcast_id
+    return str(row[0]) if row and row[0] is not None else None
 
 
 def _build_input_chunks(level: str, chunks: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -131,11 +126,7 @@ def _build_embedding_rows(
     return rows
 
 
-def _insert_embeddings(
-    conn,
-    rows: List[Dict[str, Any]],
-    logger=None,
-) -> int:
+def _insert_embeddings(conn, rows: List[Dict[str, Any]]) -> int:
     if not rows:
         return 0
 
@@ -156,14 +147,8 @@ def _insert_embeddings(
         "processing_updated_at = EXCLUDED.processing_updated_at"
     )
 
-    if logger is not None:
-        logger.info("DB write start: embeddings rows=%d level=%s", len(rows), level)
-
     with conn.cursor() as cur:
         cur.executemany(sql, rows)
-
-    if logger is not None:
-        logger.info("DB write done: embeddings rows=%d level=%s", len(rows), level)
 
     return len(rows)
 
@@ -197,16 +182,17 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
                 )
             )
             if not chapter_ids:
-                logger.warning("embedder: no test chapters")
+                logger.warning("embedder: no chapters found for test episode_id=%s", args.test_episode_id)
                 chapter_ids = None
 
-            podcast_id = _fetch_podcast_id_for_episode(conn, str(args.test_episode_id), logger=logger)
+            podcast_id = _fetch_podcast_id_for_episode(conn, str(args.test_episode_id))
             if podcast_id:
                 podcast_ids = {podcast_id}
 
         embedder = TranscriptEmbedder(logging_enabled=args.log_enabled, log_level=args.log_level)
         embedder.logger = logger
 
+        logger.info("embedder: start mode=%s", ctx.mode)
         total_updates = 0
 
         for level in ("podcast", "episode", "chapter"):
@@ -227,7 +213,7 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
                 logger=logger,
             )
             if not chunks:
-                logger.warning("embedder: no chunks level=%s", level)
+                logger.warning("embedder: no items to embed level=%s", level)
                 continue
 
             inputs = _build_input_chunks(level, chunks)
@@ -235,27 +221,25 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
                 logger.warning("embedder: no valid inputs level=%s", level)
                 continue
 
-            logger.info("embedder: embedding level=%s inputs=%d", level, len(inputs))
+            logger.info("embedder: embedding level=%s items=%d", level, len(inputs))
             embedded = embedder.embed_chunks(inputs)
 
             if not embedded:
-                logger.warning("embedder: empty embeddings level=%s", level)
+                logger.warning("embedder: no embeddings returned level=%s", level)
                 continue
 
             if dry_run:
-                logger.info("embedder: dry run, skip writes level=%s", level)
+                logger.info("embedder: dry run, skipping writes level=%s", level)
                 continue
 
             rows = _build_embedding_rows(level, embedded, batch_id, ctx.processing_update_ts)
-            total_updates += _insert_embeddings(conn, rows, logger=logger)
+            total_updates += _insert_embeddings(conn, rows)
 
         if dry_run:
             return
 
-        logger.info("DB commit start: embedder rows=%d", total_updates)
         conn.commit()
-        logger.info("DB commit done: embedder rows=%d", total_updates)
-        logger.info("embedder: done rows=%d", total_updates)
+        logger.info("embedder: done rows=%d batch_id=%s", total_updates, batch_id or "-")
 
 
 def main() -> None:

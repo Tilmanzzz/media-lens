@@ -1,4 +1,5 @@
-# audio-lens
+# media-lens
+
 [Meilenstein-Plan](https://www.notion.so/33d621dfadf7805caef5e1b62101ce35?v=33d621dfadf780b3bac6000cba9df55f&pvs=32)
 
 ## Current Build (Mock / Proof of Concept)
@@ -8,23 +9,24 @@ No real analysis models are integrated yet — sentiment and topic analysis retu
 placeholder values.
 
 ### Architecture
+
 ```
 Ingestion (Go) → MinIO (bronze bucket) → Processing (Python) → PostgreSQL
 ```
 
 ### Services
 
-| Service | Technology | Port |
-|---|---|---|
-| Data Lake | MinIO | 9000 (API), 9001 (Console) |
-| Database | PostgreSQL 16 | 5432 |
-| DB Admin UI | pgAdmin 4 | 5050 |
-| Ingestion | Go | - |
-| Silver Processing | Python | - |
-| Enriched Processing | Python, LLMs(gemma3:4b, qwen3-embedding:4b), model(wav2vec-base-superb-er) | - |
-| Backend | - | - |
-| Frontend | - | - |
-| Orchestration | Airflow/Perfect | - |
+| Service             | Technology                                                                 | Port                       |
+| ------------------- | -------------------------------------------------------------------------- | -------------------------- |
+| Data Lake           | MinIO                                                                      | 9000 (API), 9001 (Console) |
+| Database            | PostgreSQL 16                                                              | 5432                       |
+| DB Admin UI         | pgAdmin 4                                                                  | 5050                       |
+| Ingestion           | Go                                                                         | -                          |
+| Silver Processing   | Python                                                                     | -                          |
+| Enriched Processing | Python, LLMs(gemma3:4b, qwen3-embedding:4b), model(wav2vec-base-superb-er) | -                          |
+| Backend             | -                                                                          | -                          |
+| Frontend            | -                                                                          | -                          |
+| Orchestration       | Airflow/Perfect                                                            | -                          |
 
 ### Pipeline
 
@@ -50,30 +52,30 @@ functions return placeholder sentiment (`neutral`, `0.5`) and topics
 - Backend module
 - Frontend module
 - Scheduling/Orchestration
-    - e.g. Airflow, Prefect, etc.
+  - e.g. Airflow, Prefect, etc.
 
 - Ingestion
-    - Idempotency - guid tag
-    - MinIO event notifications → processing trigger
+  - Idempotency - guid tag
+  - MinIO event notifications → processing trigger
 
 - Config module
-    - check for env variables, etc. (e.g. pydantic-settings)
-- PostgreSQL
-      - full-text-search
-      - status column (pending, failed, enriched, ...)
+  - check for env variables, etc. (e.g. pydantic-settings)
+- PostgreSQL - full-text-search - status column (pending, failed, enriched, ...)
 - Logging
-BONUS:
+  BONUS:
 - metrics and dashboard (e.g. Prometheus + Grafana)
-- 
+-
 
 ### Getting Started
 
 1. Copy the environment template and fill in your values:
+
 ```bash
 cp .env.example .env
 ```
 
 2. Start all services:
+
 ```bash
 docker compose up
 ```
