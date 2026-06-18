@@ -4,14 +4,14 @@ import json
 import asyncio
 import logging
 import signal
-from collections import defaultdict
+import nltk
 from typing import Any, Dict, List
 
 import asyncpg
-import torch
 from minio import Minio
-from nltk.tokenize import TextTilingTokenizer
-from transformers import pipeline
+from pydantic import BaseModel, Field
+from google import genai
+from google.genai import types
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
@@ -25,186 +25,23 @@ logger = logging.getLogger("sectioning_worker")
 shutdown_event = asyncio.Event()
 internal_task_queue: asyncio.Queue[str] = asyncio.Queue()
 
-classifier_pipeline = None
+gemini_client = genai.Client()
 
-# Grouping labels hierarchically prevents the GPU from bottlenecking.
-# A broad pass followed by a narrow pass cuts inference time significantly.
-TOPIC_HIERARCHY = {
-    "Geopolitics & Defense": [
-        "Geopolitics",
-        "Diplomacy",
-        "Defense",
-        "Military",
-        "Warfare",
-        "Espionage",
-        "Sovereignty",
-        "Borders",
-        "Sanctions",
-        "NATO",
-    ],
-    "Technology & Innovation": [
-        "Technology",
-        "Software",
-        "Hardware",
-        "Internet",
-        "AI",
-        "Cybersecurity",
-        "Robotics",
-        "Crypto",
-        "Blockchain",
-        "Quantum",
-        "Data",
-        "Networking",
-        "Automation",
-        "Cloud",
-        "OpenSource",
-        "Programming",
-        "Telecom",
-    ],
-    "Business & Economy": [
-        "Business",
-        "Economy",
-        "Finance",
-        "Investing",
-        "Trading",
-        "Macroeconomics",
-        "Stocks",
-        "Commodities",
-        "RealEstate",
-        "Banking",
-        "Inflation",
-        "Taxation",
-        "Startups",
-        "Entrepreneurship",
-        "Management",
-        "Marketing",
-        "Labor",
-        "Logistics",
-    ],
-    "Politics & Law": [
-        "Politics",
-        "Elections",
-        "Government",
-        "Law",
-        "Constitution",
-        "Judiciary",
-        "Regulation",
-        "Policy",
-        "Corruption",
-        "Democracy",
-        "Activism",
-        "Protest",
-    ],
-    "Science & Environment": [
-        "Science",
-        "Physics",
-        "Chemistry",
-        "Biology",
-        "Astronomy",
-        "Space",
-        "Environment",
-        "Climate",
-        "Energy",
-        "Sustainability",
-        "Geology",
-        "Weather",
-        "Ecology",
-        "Nuclear",
-        "Wildlife",
-        "Oceans",
-    ],
-    "History & Society": [
-        "History",
-        "Antiquity",
-        "War",
-        "Revolution",
-        "Archaeology",
-        "Anthropology",
-        "Society",
-        "Culture",
-        "Philosophy",
-        "Ethics",
-        "Sociology",
-        "Demographics",
-        "Geography",
-        "Religion",
-        "Spirituality",
-        "Theology",
-        "Mythology",
-        "Buddhism",
-        "Christianity",
-        "Hinduism",
-        "Islam",
-        "Judaism",
-        "Esotericism",
-        "Occult",
-        "Astrology",
-    ],
-    "Health & Wellness": [
-        "Health",
-        "Medicine",
-        "Fitness",
-        "Nutrition",
-        "MentalHealth",
-        "Psychology",
-        "Neuroscience",
-        "Anatomy",
-        "Epidemiology",
-        "Wellness",
-        "Biohacking",
-        "Longevity",
-    ],
-    "Arts & Entertainment": [
-        "Arts",
-        "Literature",
-        "Books",
-        "Poetry",
-        "Design",
-        "Architecture",
-        "Music",
-        "Cinema",
-        "Film",
-        "Television",
-        "Gaming",
-        "Theater",
-        "Fashion",
-        "Photography",
-    ],
-    "Lifestyle & Leisure": [
-        "Language",
-        "Linguistics",
-        "Journalism",
-        "Leisure",
-        "Hobbies",
-        "Sports",
-        "Athletics",
-        "Racing",
-        "Automotive",
-        "Aviation",
-        "Travel",
-        "Food",
-        "Cooking",
-        "Fermentation",
-        "Agriculture",
-        "Parenting",
-        "Family",
-        "Pets",
-        "Animals",
-    ],
-    "Education & Careers": ["Education", "Careers"],
-    "Media & Format": [
-        "General",
-        "Interview",
-        "News",
-        "Opinion",
-        "Debate",
-        "Analysis",
-        "Review",
-        "Documentary",
-        "Biography",
-        "TrueCrime",
-    ],
-}
+
+class ChapterMetadata(BaseModel):
+    start_sentence_id: int = Field(
+        description="The exact ID of the first sentence in this chapter."
+    )
+    end_sentence_id: int = Field(
+        description="The exact ID of the last sentence in this chapter."
+    )
+    topic: str = Field(
+        description="A concise, free-form topic for the chapter (1 to maximum 3 words, Title Case)."
+    )
+
+
+class ChapterList(BaseModel):
+    chapters: list[ChapterMetadata]
 
 
 def handle_exit_signals() -> None:
@@ -213,8 +50,6 @@ def handle_exit_signals() -> None:
 
 
 def init_minio_client() -> Minio:
-    # Deliberately leaving the raw endpoint here. If the env var includes 'http://'
-    # when it shouldn't, we want it to fail loudly on startup rather than mask the issue.
     endpoint = os.getenv("MINIO_ENDPOINT", "localhost:9000")
     return Minio(
         endpoint,
@@ -224,26 +59,10 @@ def init_minio_client() -> Minio:
     )
 
 
-def init_local_nlp_models():
-    global classifier_pipeline
-
-    # Fallback to CPU if CUDA isn't available (useful for local dev/testing without a GPU)
-    device_idx = 0 if torch.cuda.is_available() else -1
-    device_str = "cuda" if device_idx == 0 else "cpu"
-    logger.info(f"Initializing local NLP pipelines on device: {device_str.upper()}")
-
-    classifier_pipeline = pipeline(
-        "zero-shot-classification",
-        model="MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli",
-        device=device_idx,
-    )
-
-
 def download_transcript(minio: Minio, transcript_key: str) -> Dict[str, Any]:
     logger.info(f"Downloading transcript: {transcript_key}")
     response = minio.get_object("silver", transcript_key)
     try:
-        # Buffer the stream to handle large podcast JSONs without causing a memory spike
         raw = b"".join(response.stream(32 * 1024))
         return json.loads(raw.decode("utf-8"))
     finally:
@@ -251,130 +70,97 @@ def download_transcript(minio: Minio, transcript_key: str) -> Dict[str, Any]:
         response.release_conn()
 
 
-def section_transcript_by_topic(
+def create_sentence_lines(
     whisper_segments: List[Dict[str, Any]],
-) -> List[List[Dict[str, Any]]]:
+) -> List[Dict[str, Any]]:
     if not whisper_segments:
         return []
 
-    # TextTiling needs distinct paragraphs to analyze semantic shifts.
-    # Grouping chunks of 4 segments guarantees enough context per "paragraph"
-    # for the algorithm to find structural boundaries.
-    text_blocks = []
-    block_buffer = []
-    for i, seg in enumerate(whisper_segments):
-        block_buffer.append(seg["text"].strip())
-        if (i + 1) % 4 == 0:
-            text_blocks.append(" ".join(block_buffer))
-            block_buffer = []
-    if block_buffer:
-        text_blocks.append(" ".join(block_buffer))
+    full_text = ""
+    char_to_time = []
 
-    tiling_text = "\n\n".join(text_blocks)
-
-    try:
-        ttt = TextTilingTokenizer(w=20, k=10)
-        tiles = ttt.tokenize(tiling_text)
-    except Exception as e:
-        # TextTiling can be fussy and throw errors if the text lacks variance or is too short.
-        # We catch it so we don't drop the episode, falling back to a single chapter instead.
-        logger.warning(f"TextTiling failed ({e}), falling back to single chapter.")
-        return [whisper_segments]
-
-    clean_tiles = [tile.replace("\n\n", " ").strip() for tile in tiles if tile.strip()]
-    if not clean_tiles:
-        return [whisper_segments]
-
-    sections: List[List[Dict[str, Any]]] = []
-    current_section: List[Dict[str, Any]] = []
-
-    tile_idx = 0
-    current_tile_target_len = len(clean_tiles[tile_idx])
-    current_accumulated_len = 0
-
-    # We use string length accumulation to map original Whisper segments back to the tiles.
-    # Relying on `string.replace()` is too brittle because NLTK alters whitespace and punctuation.
     for seg in whisper_segments:
-        seg_text = seg["text"].strip()
-        current_section.append(seg)
-        # +1 accounts for the space we add when joining the text later
-        current_accumulated_len += len(seg_text) + 1
+        start_time = seg["start"]
+        end_time = seg["end"]
+        text = seg["text"].strip() + " "
 
-        # Allow a 15% length tolerance to account for NLTK's internal normalizations
-        if current_accumulated_len >= current_tile_target_len * 0.85:
-            sections.append(current_section)
-            current_section = []
-            tile_idx += 1
-            if tile_idx < len(clean_tiles):
-                current_tile_target_len = len(clean_tiles[tile_idx])
-                current_accumulated_len = 0
-            else:
-                current_tile_target_len = float("inf")
+        start_idx = len(full_text)
+        full_text += text
+        end_idx = len(full_text)
 
-    # Flush any remaining segments into the final section
-    if current_section:
-        if sections and tile_idx >= len(clean_tiles):
-            sections[-1].extend(current_section)
-        else:
-            sections.append(current_section)
+        chars_in_seg = end_idx - start_idx
+        duration = end_time - start_time
 
-    return sections
+        for i in range(chars_in_seg):
+            time_at_char = start_time + (i / chars_in_seg) * duration
+            char_to_time.append(time_at_char)
 
+    sentences = nltk.sent_tokenize(full_text)
 
-def process_metadata_hierarchical(texts: List[str]) -> List[str]:
-    global classifier_pipeline
-    if not texts:
-        return []
+    sentence_lines = []
+    search_start_idx = 0
 
-    # ---------------------------------------------------------
-    # Note: No broad try/except block here. If the model OOMs
-    # or fails a tensor operation, the container should crash
-    # and restart rather than quietly labeling everything "General".
-    # ---------------------------------------------------------
+    for idx, sentence in enumerate(sentences):
+        match_idx = full_text.find(sentence, search_start_idx)
+        if match_idx == -1:
+            continue
 
-    # Phase 1: Figure out the broad category for every chunk in the batch
-    broad_labels = list(TOPIC_HIERARCHY.keys())
+        match_end_idx = match_idx + len(sentence)
 
-    broad_results = classifier_pipeline(
-        texts,
-        candidate_labels=broad_labels,
-        multi_label=False,
-        truncation=True,  # Critical: Prevents crashes if a chunk exceeds 512 tokens
-        max_length=512,
-    )
+        sent_start_time = char_to_time[match_idx]
+        sent_end_time = char_to_time[match_end_idx - 1]
 
-    if isinstance(broad_results, dict):
-        broad_results = [broad_results]
-
-    # Group texts by their winning broad category so we can batch Phase 2 efficiently.
-    category_to_indices = defaultdict(list)
-    for i, res in enumerate(broad_results):
-        category_to_indices[res["labels"][0]].append(i)
-
-    final_labels = ["General"] * len(texts)
-
-    # Phase 2: Narrow down the specific topic within the chosen broad category
-    for broad_cat, indices in category_to_indices.items():
-        # Inject "General" as a fallback in case the model is unsure about the subtopics
-        narrow_labels = TOPIC_HIERARCHY[broad_cat] + ["General"]
-        group_texts = [texts[i] for i in indices]
-
-        narrow_results = classifier_pipeline(
-            group_texts,
-            candidate_labels=narrow_labels,
-            multi_label=False,
-            truncation=True,
-            max_length=512,
+        sentence_lines.append(
+            {
+                "id": idx,
+                "start": round(sent_start_time, 3),
+                "end": round(sent_end_time, 3),
+                "text": sentence,
+            }
         )
 
-        if isinstance(narrow_results, dict):
-            narrow_results = [narrow_results]
+        search_start_idx = match_end_idx
 
-        # Map the detailed topics back to their original positions in the batch
-        for idx, res in zip(indices, narrow_results):
-            final_labels[idx] = res["labels"][0]
+    return sentence_lines
 
-    return final_labels
+
+async def extract_chapters_gemini(
+    sentence_lines: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    if not sentence_lines:
+        return {"chapters": []}
+
+    formatted_transcript = "\n".join(
+        f"[{line['id']}] {line['text']}" for line in sentence_lines
+    )
+
+    prompt = f"""
+    You are an expert audio producer. Analyze the following podcast transcript.
+    Segment it into logical chapters based on distinct topic shifts. 
+
+    Rules:
+    1. Define the boundary using the exact sentence IDs provided in brackets [ID].
+    2. Chapters must be continuous (the next chapter must start where the previous one ended).
+    3. Generate a concise, free-form topic (1 to maximum 3 words) that accurately describes the core theme.
+
+    Transcript:
+    {formatted_transcript}
+    """
+
+    try:
+        response = await gemini_client.aio.models.generate_content(
+            model="gemini-3.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=ChapterList,
+                temperature=0.1,
+            ),
+        )
+        return json.loads(response.text)
+    except Exception as e:
+        logger.error(f"Gemini API inference failed: {e}")
+        raise RuntimeError(f"Failed to extract chapters: {e}")
 
 
 async def process_episode(
@@ -397,30 +183,33 @@ async def process_episode(
         logger.warning(f"Episode {episode_id}: empty segments. Skipping.")
         return
 
-    sections = section_transcript_by_topic(whisper_segments)
-    sections = [s for s in sections if s]
+    sentence_lines = create_sentence_lines(whisper_segments)
 
-    if not sections:
+    llm_response = await extract_chapters_gemini(sentence_lines)
+    chapters_metadata = llm_response.get("chapters", [])
+
+    if not chapters_metadata:
         return
 
-    section_texts = [
-        " ".join(s["text"].strip() for s in section) for section in sections
-    ]
-
-    # Process all metadata in a single call to maximize GPU utilization
-    titles = await asyncio.to_thread(process_metadata_hierarchical, section_texts)
-
     total_lines = 0
+    max_idx = len(sentence_lines) - 1
 
-    # Wrap all database inserts in a single transaction block.
-    # Acquiring connections per-section creates massive network overhead.
     async with store.pool.acquire() as conn:
         async with conn.transaction():
-            for section_idx, (section, title) in enumerate(zip(sections, titles)):
-                start_s = int(round(section[0]["start"]))
-                end_s = int(round(section[-1]["end"]))
+            for section_idx, chapter_data in enumerate(chapters_metadata):
+                start_id = max(0, min(chapter_data["start_sentence_id"], max_idx))
+                end_id = max(0, min(chapter_data["end_sentence_id"], max_idx))
 
-                chapter_id: str = await conn.fetchval(
+                chapter_sentences = sentence_lines[start_id : end_id + 1]
+                if not chapter_sentences:
+                    continue
+
+                chapter_start_time = chapter_sentences[0]["start"]
+                chapter_end_time = chapter_sentences[-1]["end"]
+                chapter_transcript = " ".join(s["text"] for s in chapter_sentences)
+                chapter_topic = chapter_data["topic"]
+
+                chapter_db_id: str = await conn.fetchval(
                     """
                     INSERT INTO chapters
                         (episode_id, batch_id, chapter_idx, start_time, end_time, title, transcript)
@@ -436,23 +225,22 @@ async def process_episode(
                     episode_id,
                     batch_id,
                     section_idx,
-                    start_s,
-                    end_s,
-                    title,
-                    section_texts[section_idx],
+                    chapter_start_time,
+                    chapter_end_time,
+                    chapter_topic,
+                    chapter_transcript,
                 )
 
-                # Batch the transcript line inserts
                 line_records = [
                     (
-                        str(chapter_id),
+                        str(chapter_db_id),
                         batch_id,
                         line_idx,
-                        int(round(line["start"])),
-                        int(round(line["end"])),
-                        line["text"].strip(),
+                        line["start"],
+                        line["end"],
+                        line["text"],
                     )
-                    for line_idx, line in enumerate(section)
+                    for line_idx, line in enumerate(chapter_sentences)
                 ]
 
                 await conn.executemany(
@@ -469,13 +257,13 @@ async def process_episode(
                     line_records,
                 )
 
-                total_lines += len(section)
+                total_lines += len(chapter_sentences)
 
     await store.set_preprocessing_updated_at(episode_id)
     await store.set_podcast_preprocessing_updated_at(podcast_id)
 
     logger.info(
-        f"Episode {episode_id} (Podcast {podcast_id}): {len(sections)} sections generated ({total_lines} lines)."
+        f"Episode {episode_id} (Podcast {podcast_id}): {len(chapters_metadata)} chapters generated ({total_lines} lines)."
     )
 
 
@@ -488,15 +276,12 @@ async def claim_and_process_batch(
     )
 
     if not episode_ids:
-        # Cleanup the empty batch record so it doesn't clutter the DB
         await store.pool.execute(
             "DELETE FROM pipeline_batches WHERE id = $1", segmenting_batch_id
         )
         return
 
     for episode_id in episode_ids:
-        # No sweeping try/except here. If DB operations or ML inferences crash,
-        # let it bubble up so we can inspect the stack trace in the container logs.
         await process_episode(episode_id, segmenting_batch_id, store, minio)
 
     await store.complete_pipeline_batch(
@@ -507,7 +292,6 @@ async def claim_and_process_batch(
 
 
 async def postgres_listener_task(pg_url: str) -> None:
-    # Keeps a dedicated connection open to listen for Postgres NOTIFY events
     while not shutdown_event.is_set():
         conn = await asyncpg.connect(pg_url)
         try:
@@ -520,15 +304,15 @@ async def postgres_listener_task(pg_url: str) -> None:
             await conn.add_listener("segmenting_ready", on_notification)
             while not shutdown_event.is_set():
                 await asyncio.sleep(30)
-                # Ping the connection periodically to prevent silent disconnects
                 await conn.execute("SELECT 1")
+        except Exception as e:
+            logger.error(f"Postgres listener error: {e}")
+            await asyncio.sleep(5)
         finally:
             await conn.close()
 
 
 async def queue_backlog_batches(store: Store) -> None:
-    # On startup, fetch anything that finished transcription while this worker was offline.
-    # No try/except; if Postgres is unreachable on boot, the container should exit.
     rows = await store.pool.fetch(
         "SELECT id FROM pipeline_batches WHERE stage = 'transcription' AND status = 'success' ORDER BY start_ts ASC"
     )
@@ -541,8 +325,6 @@ async def main() -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, handle_exit_signals)
 
-    init_local_nlp_models()
-
     pg_url = os.getenv("POSTGRES_URL")
     if not pg_url:
         raise ValueError("POSTGRES_URL environment variable is required")
@@ -551,17 +333,24 @@ async def main() -> None:
     await store.connect()
     minio = init_minio_client()
 
-    # Start the Postgres listener as a background task
     listener = asyncio.create_task(postgres_listener_task(pg_url))
     await queue_backlog_batches(store)
 
+    sem = asyncio.Semaphore(5)
+
+    async def worker(batch_id: str):
+        async with sem:
+            try:
+                await claim_and_process_batch(batch_id, store, minio)
+            except Exception as e:
+                logger.error(f"Failed to process batch {batch_id}: {e}")
+
     while not shutdown_event.is_set():
         try:
-            # Polling with a timeout allows the loop to regularly check the shutdown_event
             transcription_batch_id = await asyncio.wait_for(
                 internal_task_queue.get(), timeout=1.0
             )
-            await claim_and_process_batch(transcription_batch_id, store, minio)
+            asyncio.create_task(worker(transcription_batch_id))
             internal_task_queue.task_done()
         except asyncio.TimeoutError:
             continue
@@ -573,10 +362,6 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    import nltk
-
-    # Fetch both punkt and punkt_tab to ensure compatibility across different Python/NLTK versions
     nltk.download("punkt", quiet=True)
     nltk.download("punkt_tab", quiet=True)
-    nltk.download("stopwords", quiet=True)
     asyncio.run(main())

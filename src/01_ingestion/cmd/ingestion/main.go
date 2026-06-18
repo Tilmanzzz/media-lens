@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,13 @@ type worker struct {
 	bronze     *blob.Bucket
 	httpClient *http.Client
 	feedParser *gofeed.Parser
+}
+
+// helpers
+
+func stripHTMLTags(input string) string {
+	re := regexp.MustCompile(`<[^>]*>`)
+	return re.ReplaceAllString(input, "")
 }
 
 func main() {
@@ -42,6 +50,7 @@ func main() {
 	fmt.Printf("started pipeline batch [%s] mode: %s\n", batchID, loadMode)
 
 	// mock trigger for legacy updates
+	// TODO: FIX
 	if loadMode == "delta" {
 		if all, err := w.store.GetPodcastsForIngestion(ctx, "full"); err == nil {
 			for _, p := range all {
@@ -124,8 +133,14 @@ func (w *worker) processPodcast(ctx context.Context, p db.Podcast, loadMode, bat
 	if sourceUpdated == nil {
 		sourceUpdated = feed.PublishedParsed
 	}
+	if sourceUpdated == nil {
+		now := time.Now().Truncate(time.Second)
+		sourceUpdated = &now
+	}
+	rawDescription := feed.Description
+	cleanDescription := stripHTMLTags(rawDescription)
 
-	if err := w.store.UpdatePodcastMetadata(ctx, p.ID, guid, feed.Title, feed.Description, hosts, sourceUpdated, batchID); err != nil {
+	if err := w.store.UpdatePodcastMetadata(ctx, p.ID, guid, feed.Title, cleanDescription, hosts, sourceUpdated, batchID); err != nil {
 		return nil, fmt.Errorf("metadata update failed: %w", err)
 	}
 
