@@ -27,6 +27,9 @@ class EmotionAnalyser:
         config: Optional[EmotionConfig] = None,
         config_path: Optional[str | Path] = None,
     ) -> None:
+        if config is None and config_path is None:
+            config_path = Path(__file__).resolve().with_name("emotion_analyser_config.json")
+
         if config is None and config_path is not None:
             config = EmotionConfig.from_file(config_path)
 

@@ -14,7 +14,7 @@ from common.app_logger import AppLogger
 from common.db_connector import DbConnector
 from silver_enriched.processing_pipeline.pipeline_utils import (
     LoadContext, build_pipeline_logger, fetch_chapter_ids_for_episode,
-    fetch_chunks, load_json_config)
+    fetch_chunks, fetch_db_now, load_json_config, pipeline_batch_scope)
 from silver_enriched.text_summarizer.text_summarizer_core import TextSummarizer
 
 
@@ -28,8 +28,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--config", default="processing_pipeline_config.json", help="Path to pipeline args JSON config")
     parser.add_argument("--mode", choices=["full", "delta"], default="delta")
-    parser.add_argument("--stage", default="processing", help="pipeline_batches.stage for watermark lookup")
-    parser.add_argument("--watermark", default=None, help="ISO timestamp override for delta load")
+    parser.add_argument("--stage", default="text_summarizer", help="pipeline_batches.stage tag (documentation only)")
     parser.add_argument("--batch-id", default=None, help="Batch UUID to store on writes")
     parser.add_argument(
         "--dry-run",
@@ -116,7 +115,7 @@ def update_chapter_summaries(
 
     summaries = list(summaries)
     sql = (
-        "UPDATE chapter SET summary = %s, processing_updated_at = %s, batch_id = %s "
+        "UPDATE chapters SET summary = %s, processing_updated_at = %s, batch_id = %s "
         "WHERE id = %s"
     )
     params: List[tuple] = []
@@ -152,70 +151,72 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
         log_file=args.log_file,
     )
 
-    chapter_ids = None
-    end_ts = None
+    dry_run = args.dry_run or ctx.dry_run
+    with pipeline_batch_scope(conn, args.stage, ctx.mode, args.batch_id, dry_run, logger=logger) as batch_id:
+        chapter_ids = None
+        end_ts = None
 
-    if args.testing and args.test_end_watermark:
-        end_ts = ctx.connector.parse_ts(args.test_end_watermark)
+        if args.testing and args.test_end_watermark:
+            end_ts = ctx.connector.parse_ts(args.test_end_watermark)
 
-    if args.testing and args.test_episode_id:
-        chapter_ids = set(
-            fetch_chapter_ids_for_episode(
-                conn,
-                str(args.test_episode_id),
-                args.test_chapter_limit,
+        if args.testing and args.test_episode_id:
+            chapter_ids = set(
+                fetch_chapter_ids_for_episode(
+                    conn,
+                    str(args.test_episode_id),
+                    args.test_chapter_limit,
+                )
             )
+            if not chapter_ids:
+                logger.warning("text_summarizer: no test chapters")
+                return
+
+        chunks = fetch_chunks(
+            conn,
+            step="text_summarizer",
+            level="chapter",
+            ids=chapter_ids,
+            ctx=ctx,
+            end_ts=end_ts,
+            logger=logger,
         )
-        if not chapter_ids:
-            logger.warning("text_summarizer: no test chapters")
+        if not chunks:
+            logger.warning("text_summarizer: no chunks")
             return
 
-    chunks = fetch_chunks(
-        conn,
-        step="text_summarizer",
-        level="chapter",
-        ids=chapter_ids,
-        ctx=ctx,
-        end_ts=end_ts,
-        logger=logger,
-    )
-    if not chunks:
-        logger.warning("text_summarizer: no chunks")
-        return
+        logger.info("text_summarizer: chunks=%d", len(chunks))
 
-    logger.info("text_summarizer: chunks=%d", len(chunks))
+        summarizer = TextSummarizer()
+        summarizer.logger = logger
 
-    summarizer = TextSummarizer()
-    summarizer.logger = logger
+        episode_summaries = summarizer.summarize_all_episodes(chunks)
+        chapter_summaries = summarizer.summarize_all_chapters(chunks)
 
-    episode_summaries = summarizer.summarize_all_episodes(chunks)
-    chapter_summaries = summarizer.summarize_all_chapters(chunks)
+        logger.info("text_summarizer: summaries episodes=%d chapters=%d", len(episode_summaries), len(chapter_summaries))
 
-    logger.info("text_summarizer: summaries episodes=%d chapters=%d", len(episode_summaries), len(chapter_summaries))
+        if dry_run:
+            logger.info("text_summarizer: dry run, skip writes")
+            return
 
-    if args.dry_run or ctx.dry_run:
-        logger.info("text_summarizer: dry run, skip writes")
-        return
-
-    total_updates = 0
-    total_updates += update_episode_summaries(
-        conn,
-        episode_summaries,
-        args.batch_id,
-        ctx.processing_update_ts,
-        logger=logger,
-    )
-    total_updates += update_chapter_summaries(
-        conn,
-        chapter_summaries,
-        args.batch_id,
-        ctx.processing_update_ts,
-        logger=logger,
-    )
-    logger.info("DB commit start: text_summarizer rows=%d", total_updates)
-    conn.commit()
-    logger.info("DB commit done: text_summarizer rows=%d", total_updates)
-    logger.info("text_summarizer: done rows=%d", total_updates)
+        total_updates = 0
+        total_updates += update_episode_summaries(
+            conn,
+            episode_summaries,
+            batch_id,
+            ctx.processing_update_ts,
+            logger=logger,
+        )
+        total_updates += update_chapter_summaries(
+            conn,
+            chapter_summaries,
+            batch_id,
+            ctx.processing_update_ts,
+            logger=logger,
+        )
+        logger.info("DB commit start: text_summarizer rows=%d", total_updates)
+        conn.commit()
+        logger.info("DB commit done: text_summarizer rows=%d", total_updates)
+        logger.info("text_summarizer: done rows=%d", total_updates)
 
 
 def main() -> None:
@@ -231,16 +232,10 @@ def main() -> None:
     ).build()
 
     with connector.get_connection(logger=logger) as conn:
-        watermark = connector.parse_ts(args.watermark)
-        if args.mode == "delta":
-            if watermark is None:
-                logger.info("watermark: resolve stage=%s", args.stage)
-                watermark = connector.get_watermark(conn, args.stage, logger=logger)
-        logger.info("watermark: mode=%s value=%s", args.mode, watermark)
         ctx = LoadContext(
             mode=args.mode,
-            watermark=watermark,
             connector=connector,
+            processing_update_ts=fetch_db_now(conn),
             logger=logger,
             dry_run=args.dry_run,
         )

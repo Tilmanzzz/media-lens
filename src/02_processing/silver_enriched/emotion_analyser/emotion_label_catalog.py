@@ -2,13 +2,25 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Union
 
+_EMOTION_LABEL_ALIASES = {
+    "neu": "neutral",
+    "hap": "happy",
+    "ang": "angry",
+    "sad": "sad",
+}
+
+
+def _normalize_label(label: Any) -> str:
+    normalized = str(label).strip()
+    return _EMOTION_LABEL_ALIASES.get(normalized, normalized)
+
 
 class EmotionLabelCatalog:
     def __init__(self, id2label: Dict[Union[int, str], str]) -> None:
         normalized: Dict[int, str] = {}
         for key, value in id2label.items():
             try:
-                normalized[int(key)] = str(value)
+                normalized[int(key)] = _normalize_label(value)
             except (TypeError, ValueError):
                 continue
 

@@ -1,10 +1,9 @@
 {
-  "mode": "full",
-  "stage": "processing",
-  "watermark": null,
+  "mode": "delta",
   "batch_id": null,
+  "max_workers": 3,
   "dry_run": false,
-  "steps": "text_summarizer,fact_checker,embedder",
+  "steps": "text_summarizer,fact_checker,embedder,emotion_scoring",
   "testing": false,
   "test_episode_id": null,
   "test_chapter_limit": null,
