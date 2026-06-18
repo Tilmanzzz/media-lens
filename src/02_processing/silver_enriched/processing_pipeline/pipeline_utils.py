@@ -269,41 +269,30 @@ def fetch_chunks(
         ORDER BY {spec['order_by']}
     """
 
-    if logger is not None:
-        logger.info(
-            "DB fetch start: step=%s level=%s mode=%s ids=%s test_end_ts=%s",
-            step,
-            level or "-",
-            ctx.mode if ctx is not None else "full",
-            len(ids) if ids is not None else "all",
-            end_ts,
-        )
-        if ctx is not None and ctx.mode == "delta":
-            logger.info(
-                "delta watermark check: step=%s level=%s source=%s.%s "
-                "target=pipeline_batches.start_ts(stage=%s,status=success) watermark=%s",
-                step,
-                level or "-",
-                spec["preprocessing_table"],
-                spec["preprocessing_column"],
-                spec["batch_stage"],
-                batch_watermark,
-            )
-
     chunks: List[Dict[str, Any]] = []
     with conn.cursor() as cur:
         cur.execute(sql, params)
         rows = cur.fetchall()
         column_names = [column[0] for column in cur.description]
 
-        if logger is not None:
-            logger.info("DB fetch done: step=%s level=%s rows=%d", step, level or "-", len(rows))
-
         for row in rows:
             chunk = dict(zip(column_names, row))
             debug_message = _format_delta_debug(step, level, chunk, ctx, end_ts, batch_watermark)
             if logger is not None:
                 logger.debug(debug_message)
+
+    if logger is not None:
+        mode = ctx.mode if ctx is not None else "full"
+        if mode == "delta":
+            logger.info(
+                "fetch_chunks: step=%s level=%s mode=delta watermark=%s rows=%d",
+                step, level or "-", batch_watermark, len(rows),
+            )
+        else:
+            logger.info(
+                "fetch_chunks: step=%s level=%s mode=full rows=%d",
+                step, level or "-", len(rows),
+            )
             chunks.append(chunk)
 
     return chunks
@@ -322,19 +311,15 @@ def fetch_chapter_ids_for_episode(
         ORDER BY ch.chapter_idx
         LIMIT %s
     """
-    if logger is not None:
-        logger.info("DB query start: chapter_ids episode=%s limit=%s", episode_id, limit)
     with conn.cursor() as cur:
         cur.execute(sql, (episode_id, limit))
         chapter_ids = [str(row[0]) for row in cur.fetchall()]
     if logger is not None:
-        logger.info("DB query done: chapter_ids episode=%s rows=%d", episode_id, len(chapter_ids))
+        logger.info("fetch: chapter_ids episode_id=%s rows=%d", episode_id, len(chapter_ids))
     return chapter_ids
 
 
 def start_pipeline_batch(conn, stage: str, load_mode: str, logger: Optional[logging.Logger] = None) -> str:
-    if logger is not None:
-        logger.info("DB write start: pipeline_batch stage=%s load_mode=%s", stage, load_mode)
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -347,13 +332,11 @@ def start_pipeline_batch(conn, stage: str, load_mode: str, logger: Optional[logg
         batch_id = str(cur.fetchone()[0])
     conn.commit()
     if logger is not None:
-        logger.info("DB write done: pipeline_batch id=%s stage=%s load_mode=%s", batch_id, stage, load_mode)
+        logger.info("pipeline_batch: created batch_id=%s stage=%s mode=%s", batch_id, stage, load_mode)
     return batch_id
 
 
 def finalize_pipeline_batch(conn, batch_id: str, status: str, logger: Optional[logging.Logger] = None) -> None:
-    if logger is not None:
-        logger.info("DB write start: pipeline_batch id=%s status=%s", batch_id, status)
     with conn.cursor() as cur:
         cur.execute(
             "UPDATE pipeline_batches SET status = %s, fin_ts = NOW() WHERE id = %s",
@@ -361,7 +344,7 @@ def finalize_pipeline_batch(conn, batch_id: str, status: str, logger: Optional[l
         )
     conn.commit()
     if logger is not None:
-        logger.info("DB write done: pipeline_batch id=%s status=%s", batch_id, status)
+        logger.info("pipeline_batch: finalized batch_id=%s status=%s", batch_id, status)
 
 
 @contextmanager
@@ -374,6 +357,8 @@ def pipeline_batch_scope(
     logger: Optional[logging.Logger] = None,
 ) -> Iterator[Optional[str]]:
     owns_batch = batch_id is None and not dry_run
+    if dry_run and logger is not None:
+        logger.info("pipeline_batch: dry run, no batch created stage=%s", stage)
     if owns_batch:
         batch_id = start_pipeline_batch(conn, stage, load_mode, logger=logger)
 
@@ -385,12 +370,12 @@ def pipeline_batch_scope(
                 conn.rollback()
             except Exception:
                 if logger is not None:
-                    logger.exception("pipeline_batch: rollback failed")
+                    logger.exception("pipeline_batch: rollback failed stage=%s batch_id=%s", stage, batch_id)
             try:
                 finalize_pipeline_batch(conn, batch_id, "failed", logger=logger)
             except Exception:
                 if logger is not None:
-                    logger.exception("pipeline_batch: failed to finalize batch as failed")
+                    logger.exception("pipeline_batch: could not finalize as failed batch_id=%s", batch_id)
         raise
     else:
         if owns_batch:

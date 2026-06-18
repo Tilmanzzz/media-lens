@@ -5,12 +5,14 @@ import copy
 import importlib.util
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import replace
 from pathlib import Path
 
 SRC_DIR = str(Path(__file__).resolve()).split("src")[0] + "src\\02_processing"
 if str(SRC_DIR) not in sys.path:
     sys.path.append(str(SRC_DIR))
 
+from common.app_logger import child_logger
 from common.db_connector import DbConnector
 from silver_enriched.processing_pipeline.pipeline_utils import (
     LoadContext, build_pipeline_logger, fetch_db_now, load_json_config)
@@ -141,9 +143,10 @@ def main() -> None:
     def run_one(step: str) -> None:
         step_args = copy.copy(args)
         step_args.stage = step  # pipeline_batches.stage enum value matches the step name
+        step_ctx = replace(ctx, logger=child_logger(logger, step))
         with connector.get_connection(logger=logger) as conn:
             logger.info("step: start %s", step)
-            modules[step].run_step(conn, ctx, step_args)
+            modules[step].run_step(conn, step_ctx, step_args)
             logger.info("step: done %s", step)
 
     parallel_steps = [s for s in steps if s in PARALLEL_STEPS]

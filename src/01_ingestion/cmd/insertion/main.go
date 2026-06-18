@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/mmcdole/gofeed"
 
-	"github.com/tilmanzzz/audio-lens/internal/go/db"
+	"github.com/tilmanzzz/media-lens/internal/go/db"
 )
 
 func strPtr(s string) *string {

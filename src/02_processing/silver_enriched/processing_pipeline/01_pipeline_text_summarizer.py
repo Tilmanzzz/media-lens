@@ -65,41 +65,27 @@ def update_episode_summaries(
     summaries: Iterable[Dict[str, Any]],
     batch_id: Optional[str],
     processing_update_ts: Optional[datetime],
-    logger=None,
 ) -> int:
-
     if processing_update_ts is None:
         raise ValueError("processing_update_ts is required for processing writes")
 
-    summaries = list(summaries)
     sql = (
         "UPDATE episodes SET summary = %s, processing_updated_at = %s, batch_id = %s "
         "WHERE id = %s"
     )
-
     params: List[tuple] = []
-
-    if logger is not None:
-        logger.info("DB write start: episode summaries count=%d batch_id=%s", len(summaries), batch_id or "-")
-
     for summary in summaries:
         episode_id = summary.get("episode_id")
         text = summary.get("summary")
-
         if not episode_id or text is None:
             continue
-
         params.append((text, processing_update_ts, batch_id, episode_id))
 
     with conn.cursor() as cur:
         if params:
             cur.executemany(sql, params)
-        updated = len(params)
 
-    if logger is not None:
-        logger.info("DB write done: episode summaries rows=%d", updated)
-
-    return updated
+    return len(params)
 
 
 def update_chapter_summaries(
@@ -107,40 +93,27 @@ def update_chapter_summaries(
     summaries: Iterable[Dict[str, Any]],
     batch_id: Optional[str],
     processing_update_ts: Optional[datetime],
-    logger=None,
 ) -> int:
-
     if processing_update_ts is None:
         raise ValueError("processing_update_ts is required for processing writes")
 
-    summaries = list(summaries)
     sql = (
         "UPDATE chapters SET summary = %s, processing_updated_at = %s, batch_id = %s "
         "WHERE id = %s"
     )
     params: List[tuple] = []
-
-    if logger is not None:
-        logger.info("DB write start: chapter summaries count=%d batch_id=%s", len(summaries), batch_id or "-")
-
     for summary in summaries:
         chapter_id = summary.get("chapter_id")
         text = summary.get("summary")
-
         if not chapter_id or text is None:
             continue
-
         params.append((text, processing_update_ts, batch_id, chapter_id))
 
     with conn.cursor() as cur:
         if params:
             cur.executemany(sql, params)
-        updated = len(params)
 
-    if logger is not None:
-        logger.info("DB write done: chapter summaries rows=%d", updated)
-
-    return updated
+    return len(params)
 
 def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
     logger = ctx.logger or build_pipeline_logger(
@@ -181,42 +154,35 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
             logger=logger,
         )
         if not chunks:
-            logger.warning("text_summarizer: no chunks")
+            logger.warning("text_summarizer: no chapters to process")
             return
 
-        logger.info("text_summarizer: chunks=%d", len(chunks))
+        logger.info("text_summarizer: start mode=%s chapters=%d", ctx.mode, len(chunks))
 
         summarizer = TextSummarizer()
         summarizer.logger = logger
 
         episode_summaries = summarizer.summarize_all_episodes(chunks)
         chapter_summaries = summarizer.summarize_all_chapters(chunks)
-
-        logger.info("text_summarizer: summaries episodes=%d chapters=%d", len(episode_summaries), len(chapter_summaries))
+        logger.info(
+            "text_summarizer: summaries ready episodes=%d chapters=%d",
+            len(episode_summaries), len(chapter_summaries),
+        )
 
         if dry_run:
-            logger.info("text_summarizer: dry run, skip writes")
+            logger.info(
+                "text_summarizer: dry run, skipping writes episodes=%d chapters=%d",
+                len(episode_summaries), len(chapter_summaries),
+            )
             return
 
-        total_updates = 0
-        total_updates += update_episode_summaries(
-            conn,
-            episode_summaries,
-            batch_id,
-            ctx.processing_update_ts,
-            logger=logger,
-        )
-        total_updates += update_chapter_summaries(
-            conn,
-            chapter_summaries,
-            batch_id,
-            ctx.processing_update_ts,
-            logger=logger,
-        )
-        logger.info("DB commit start: text_summarizer rows=%d", total_updates)
+        ep_count = update_episode_summaries(conn, episode_summaries, batch_id, ctx.processing_update_ts)
+        ch_count = update_chapter_summaries(conn, chapter_summaries, batch_id, ctx.processing_update_ts)
         conn.commit()
-        logger.info("DB commit done: text_summarizer rows=%d", total_updates)
-        logger.info("text_summarizer: done rows=%d", total_updates)
+        logger.info(
+            "text_summarizer: done episodes=%d chapters=%d batch_id=%s",
+            ep_count, ch_count, batch_id or "-",
+        )
 
 
 def main() -> None:

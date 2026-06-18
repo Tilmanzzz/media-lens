@@ -1,7 +1,7 @@
 {
   "Servers": {
     "1": {
-      "Name": "audio-lens",
+      "Name": "media-lens",
       "Group": "Servers",
       "Host": "postgres",
       "Port": 5432,

@@ -116,7 +116,6 @@ def _update_transcript_lines(
     rows: Iterable[Dict[str, Any]],
     batch_id: Optional[str],
     processing_update_ts: Optional[datetime],
-    logger=None,
 ) -> int:
     if processing_update_ts is None:
         raise ValueError("processing_update_ts is required for processing writes")
@@ -131,9 +130,6 @@ def _update_transcript_lines(
 
         params.append((str(emotion), float(emotion_score), batch_id, processing_update_ts, line_id))
 
-    if logger is not None:
-        logger.info("DB write start: transcript_lines count=%d batch_id=%s", len(params), batch_id or "-")
-
     sql = """
         UPDATE transcript_lines
         SET emotion = %s::emotion_label,
@@ -146,9 +142,6 @@ def _update_transcript_lines(
     with conn.cursor() as cur:
         if params:
             cur.executemany(sql, params)
-
-    if logger is not None:
-        logger.info("DB write done: transcript_lines rows=%d", len(params))
 
     return len(params)
 
@@ -172,27 +165,24 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
             logger=logger,
         )
         if not chunks:
-            logger.warning("emotion_scoring: no chunks")
+            logger.warning("emotion_scoring: no lines to score")
             return
 
-        logger.info("emotion_scoring: chunks=%d", len(chunks))
-        if logger is not None:
-            try:
-                logger.debug("emotion_scoring: sample_chunks=%s", str(chunks[:5]))
-            except Exception:
-                logger.debug("emotion_scoring: sample_chunks unavailable")
+        episodes = _group_by_episode(chunks)
+        logger.info(
+            "emotion_scoring: start mode=%s episodes=%d lines=%d",
+            ctx.mode, len(episodes), len(chunks),
+        )
 
         minio_client = init_minio_client()
         analyser = EmotionAnalyser()
 
-        # persistent per-episode cache (configurable via --cache-dir, EMOTION_CACHE_DIR, or emotion_analyser_config.json)
         # getattr: --cache-dir only exists on this step's own parser, not on the runner's args.
         cache_dir_arg = getattr(args, "cache_dir", None) or os.environ.get("EMOTION_CACHE_DIR") or analyser.config.audio_cache_dir
         cache_root = Path(cache_dir_arg).expanduser()
         try:
             cache_root.mkdir(parents=True, exist_ok=True)
         except Exception:
-            # fallback to temp dir if cache cannot be created
             cache_root = None
 
         if cache_root is not None and analyser.config.clear_cache_before_run:
@@ -206,10 +196,10 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
             local_audio_cache: Dict[str, Path] = {}
             updates: List[Dict[str, Any]] = []
 
-            for episode_id, episode_chunks in _group_by_episode(chunks).items():
+            for episode_id, episode_chunks in episodes.items():
                 audio_key = str(episode_chunks[0].get("audio_key") or "").strip()
                 if not audio_key:
-                    logger.warning("emotion_scoring: missing audio_key episode_id=%s", episode_id)
+                    logger.warning("emotion_scoring: skipping episode, no audio_key episode_id=%s", episode_id)
                     continue
 
                 source_audio = local_audio_cache.get(audio_key)
@@ -219,57 +209,74 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
                         if cache_root is not None:
                             cached_path = cache_root / filename
                             if not cached_path.exists():
-                                logger.info("emotion_scoring: downloading audio_key=%s to cache=%s", audio_key, str(cached_path))
+                                logger.info(
+                                    "emotion_scoring: downloading audio episode_id=%s audio_key=%s",
+                                    episode_id, audio_key,
+                                )
                                 download_object_to_path(minio_client, audio_key, cached_path, logger=logger)
-                                try:
-                                    logger.info("emotion_scoring: downloaded size=%d", cached_path.stat().st_size)
-                                except Exception:
-                                    logger.debug("emotion_scoring: could not stat cached file")
                             else:
-                                logger.info("emotion_scoring: using cached audio file=%s", str(cached_path))
+                                logger.info(
+                                    "emotion_scoring: audio cache hit episode_id=%s audio_key=%s",
+                                    episode_id, audio_key,
+                                )
                             source_audio = cached_path
                         else:
-                            # fallback to ephemeral temp root
                             source_audio = temp_root / filename
-                            logger.info("emotion_scoring: downloading audio_key=%s to temp=%s", audio_key, str(source_audio))
+                            logger.info(
+                                "emotion_scoring: downloading audio episode_id=%s audio_key=%s (no persistent cache)",
+                                episode_id, audio_key,
+                            )
                             download_object_to_path(minio_client, audio_key, source_audio, logger=logger)
-                            try:
-                                logger.info("emotion_scoring: downloaded size=%d", source_audio.stat().st_size)
-                            except Exception:
-                                logger.debug("emotion_scoring: could not stat temp file")
                     except S3Error as exc:
                         if exc.code == "NoSuchKey":
                             logger.error(
-                                "emotion_scoring: audio object missing, skipping episode episode_id=%s audio_key=%s: %s",
-                                episode_id, audio_key, exc,
+                                "emotion_scoring: audio file not found in storage, skipping episode episode_id=%s audio_key=%s",
+                                episode_id, audio_key,
                             )
                             continue
                         raise
                     local_audio_cache[audio_key] = source_audio
+
+                logger.info(
+                    "emotion_scoring: processing episode_id=%s lines=%d",
+                    episode_id, len(episode_chunks),
+                )
+                scored = 0
+                skipped = 0
 
                 for chunk in episode_chunks:
                     line_id = chunk.get("transcript_line_id")
                     start_time = chunk.get("start_time")
                     end_time = chunk.get("end_time")
                     if not line_id or start_time is None or end_time is None:
-                        logger.debug(
-                            "emotion_scoring: skipping chunk missing fields line_id=%s start_time=%s end_time=%s chunk=%s",
-                            line_id,
-                            start_time,
-                            end_time,
-                            str(chunk),
+                        logger.warning(
+                            "emotion_scoring: skipping line with missing fields episode_id=%s line_id=%s start=%s end=%s",
+                            episode_id, line_id, start_time, end_time,
                         )
+                        skipped += 1
                         continue
 
                     segment_path = temp_root / f"{line_id}.wav"
                     try:
-                        logger.debug("emotion_scoring: extracting segment line_id=%s start=%s end=%s to %s", line_id, start_time, end_time, str(segment_path))
+                        logger.debug(
+                            "emotion_scoring: scoring line_id=%s episode_id=%s start=%.2f end=%.2f",
+                            line_id, episode_id, float(start_time), float(end_time),
+                        )
                         _extract_line_segment(source_audio, segment_path, float(start_time), float(end_time), logger=logger)
-                        logger.debug("emotion_scoring: extracting done line_id=%s", line_id)
                         result = analyser.score_audio(segment_path)
-                        logger.debug("emotion_scoring: analyser result for line_id=%s -> %s", line_id, str(result))
+                    except ValueError as exc:
+                        logger.warning(
+                            "emotion_scoring: skipping line_id=%s episode_id=%s: %s",
+                            line_id, episode_id, exc,
+                        )
+                        skipped += 1
+                        continue
                     except Exception as exc:
-                        logger.exception("emotion_scoring: failed transcript_line_id=%s: %s", line_id, exc)
+                        logger.exception(
+                            "emotion_scoring: failed line_id=%s episode_id=%s: %s",
+                            line_id, episode_id, exc,
+                        )
+                        skipped += 1
                         continue
 
                     updates.append({
@@ -277,14 +284,19 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
                         "emotion": result.get("emotion"),
                         "emotion_score": result.get("confidence"),
                     })
-                    logger.debug("emotion_scoring: appended update for line_id=%s emotion=%s score=%s", line_id, result.get("emotion"), result.get("confidence"))
+                    scored += 1
+
+                logger.info(
+                    "emotion_scoring: episode done episode_id=%s scored=%d skipped=%d",
+                    episode_id, scored, skipped,
+                )
 
         if not updates:
-            logger.warning("emotion_scoring: no successful updates")
+            logger.warning("emotion_scoring: no lines scored successfully")
             return
 
         if dry_run:
-            logger.info("emotion_scoring: dry run, skip writes")
+            logger.info("emotion_scoring: dry run, skipping %d writes", len(updates))
             return
 
         total_updates = _update_transcript_lines(
@@ -292,12 +304,12 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
             updates,
             batch_id,
             ctx.processing_update_ts,
-            logger=logger,
         )
-        logger.info("DB commit start: emotion_scoring rows=%d", total_updates)
         conn.commit()
-        logger.info("DB commit done: emotion_scoring rows=%d", total_updates)
-        logger.info("emotion_scoring: done rows=%d", total_updates)
+        logger.info(
+            "emotion_scoring: done scored=%d batch_id=%s",
+            total_updates, batch_id or "-",
+        )
 
 
 def main() -> None:

@@ -1,6 +1,6 @@
 # Silver Enriched - Übersicht
 
-> Diese Doku-Reihe beschreibt die Verarbeitungsschicht **Silver Enriched** im `audio-lens`-Projekt.
+> Diese Doku-Reihe beschreibt die Verarbeitungsschicht **Silver Enriched** im `media-lens`-Projekt.
 > Sie liegt im Code unter [`src/02_processing/silver_enriched/`](../../src/02_processing/silver_enriched/).
 
 ## Was ist Silver Enriched?
