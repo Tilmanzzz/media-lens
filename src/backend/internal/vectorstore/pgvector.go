@@ -10,11 +10,12 @@ import (
 )
 
 type EpisodeHit struct {
-	EpisodeID string  `json:"episode_id"`
-	Title     string  `json:"title"`
-	PodcastName string `json:"podcast_name"`
-	CoverKey  string  `json:"cover_key"`
-	Score     float64 `json:"score"`
+	EpisodeID       string  `json:"episode_id"`
+	Title           string  `json:"title"`
+	PodcastName     string  `json:"podcast_name"`
+	CoverKey        string  `json:"cover_key"`
+	PodcastImageURL string  `json:"-"`
+	Score           float64 `json:"score"`
 }
 
 type ChunkHit struct {
@@ -37,6 +38,7 @@ func (c *PgVectorClient) SearchEpisodes(ctx context.Context, vector []float64, l
 
 	rows, err := c.db.QueryContext(ctx, `
 		SELECT e.id, e.title, p.title, COALESCE(e.cover_key, ''),
+		       COALESCE(p.image_url, ''),
 		       1 - (emb.embedding <=> $1::halfvec) AS score
 		FROM embeddings emb
 		JOIN episodes e ON e.id = emb.episode_id
@@ -55,7 +57,7 @@ func (c *PgVectorClient) SearchEpisodes(ctx context.Context, vector []float64, l
 	var episodes []EpisodeHit
 	for rows.Next() {
 		var h EpisodeHit
-		if err := rows.Scan(&h.EpisodeID, &h.Title, &h.PodcastName, &h.CoverKey, &h.Score); err != nil {
+		if err := rows.Scan(&h.EpisodeID, &h.Title, &h.PodcastName, &h.CoverKey, &h.PodcastImageURL, &h.Score); err != nil {
 			return nil, fmt.Errorf("scan episode hit: %w", err)
 		}
 		episodes = append(episodes, h)

@@ -16,6 +16,7 @@ type Episode struct {
 	CoverKey        string       `json:"cover_key,omitempty"`
 	Summary         string       `json:"summary,omitempty"`
 	IngestedAt      time.Time    `json:"ingested_at"`
+	PodcastImageURL string       `json:"-"`
 }
 
 type EpisodeCard struct {

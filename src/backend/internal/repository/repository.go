@@ -32,7 +32,8 @@ func (r *postgresEpisodeRepo) GetByID(ctx context.Context, id string) (*model.Ep
 		SELECT e.id, e.title, e.podcast_id, p.title,
 		       e.published_at, e.duration_seconds,
 		       COALESCE(e.audio_key, ''), COALESCE(e.cover_key, ''),
-		       COALESCE(e.summary, ''), e.ingested_at
+		       COALESCE(e.summary, ''), e.ingested_at,
+		       COALESCE(p.image_url, '')
 		FROM episodes e
 		JOIN podcasts p ON p.id = e.podcast_id
 		WHERE e.id = $1
@@ -96,7 +97,8 @@ func (r *postgresEpisodeRepo) ListPaginated(ctx context.Context, q string, curso
 		SELECT e.id, e.title, e.podcast_id, p.title,
 		       e.published_at, e.duration_seconds,
 		       COALESCE(e.audio_key, ''), COALESCE(e.cover_key, ''),
-		       COALESCE(e.summary, ''), e.ingested_at
+		       COALESCE(e.summary, ''), e.ingested_at,
+		       COALESCE(p.image_url, '')
 		FROM episodes e
 		JOIN podcasts p ON p.id = e.podcast_id
 		%s
@@ -129,7 +131,8 @@ func scanEpisode(row *sql.Row) (*model.Episode, error) {
 	var durationSeconds sql.NullInt64
 	err := row.Scan(&ep.ID, &ep.Title, &ep.PodcastID, &ep.PodcastName,
 		&ep.PublishedAt, &durationSeconds,
-		&ep.AudioKey, &ep.CoverKey, &ep.Summary, &ep.IngestedAt)
+		&ep.AudioKey, &ep.CoverKey, &ep.Summary, &ep.IngestedAt,
+		&ep.PodcastImageURL)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +150,8 @@ func scanEpisodes(rows *sql.Rows) ([]model.Episode, error) {
 		var durationSeconds sql.NullInt64
 		if err := rows.Scan(&ep.ID, &ep.Title, &ep.PodcastID, &ep.PodcastName,
 			&ep.PublishedAt, &durationSeconds,
-			&ep.AudioKey, &ep.CoverKey, &ep.Summary, &ep.IngestedAt); err != nil {
+			&ep.AudioKey, &ep.CoverKey, &ep.Summary, &ep.IngestedAt,
+			&ep.PodcastImageURL); err != nil {
 			return nil, fmt.Errorf("scan episode row: %w", err)
 		}
 		if durationSeconds.Valid {

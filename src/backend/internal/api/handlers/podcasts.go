@@ -111,6 +111,8 @@ func episodeToCard(ep model.Episode, coverURLs map[string]*url.URL) model.Episod
 	}
 	if u, ok := coverURLs[ep.CoverKey]; ok {
 		card.CoverURL = u.String()
+	} else if ep.PodcastImageURL != "" {
+		card.CoverURL = ep.PodcastImageURL
 	}
 	return card
 }
@@ -133,6 +135,9 @@ func (h *Handler) episodeToDetail(c *gin.Context, ep model.Episode) model.Episod
 		} else {
 			log.Printf("WARN presign cover %q: %v", ep.CoverKey, err)
 		}
+	}
+	if detail.CoverURL == "" && ep.PodcastImageURL != "" {
+		detail.CoverURL = ep.PodcastImageURL
 	}
 	return detail
 }
