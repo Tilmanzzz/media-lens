@@ -34,12 +34,12 @@ func (r *postgresEpisodeRepo) GetByID(ctx context.Context, id string) (*model.Ep
 		       COALESCE(e.audio_key, ''), COALESCE(e.cover_key, ''),
 		       COALESCE(e.summary, ''), e.ingested_at,
 		       COALESCE(p.image_url, ''),
-		       (pb.stage = 'processing' AND pb.status IN ('success', 'consumed')) AS processing_complete
+		       (pb.stage = 'fact_checker' AND pb.status IN ('success', 'consumed')) AS processing_complete
 		FROM episodes e
 		JOIN podcasts p ON p.id = e.podcast_id
 		JOIN pipeline_batches pb ON pb.id = e.batch_id
 		WHERE e.id = $1
-		  AND pb.stage IN ('transcription', 'segmenting', 'processing')
+		  AND pb.stage IN ('transcription', 'segmenting', 'text_summarizer', 'emotion_scoring', 'embedder', 'fact_checker')
 		  AND pb.status IN ('success', 'consumed')
 	`, id)
 
@@ -62,7 +62,7 @@ func (r *postgresEpisodeRepo) ListPaginated(ctx context.Context, q string, curso
 	var args []any
 	argIdx := 1
 
-	whereClauses = append(whereClauses, "pb.stage IN ('transcription', 'segmenting', 'processing')")
+	whereClauses = append(whereClauses, "pb.stage IN ('transcription', 'segmenting', 'text_summarizer', 'emotion_scoring', 'embedder', 'fact_checker')")
 	whereClauses = append(whereClauses, "pb.status IN ('success', 'consumed')")
 
 	if q != "" {
@@ -104,7 +104,7 @@ func (r *postgresEpisodeRepo) ListPaginated(ctx context.Context, q string, curso
 		       COALESCE(e.audio_key, ''), COALESCE(e.cover_key, ''),
 		       COALESCE(e.summary, ''), e.ingested_at,
 		       COALESCE(p.image_url, ''),
-		       (pb.stage = 'processing' AND pb.status IN ('success', 'consumed')) AS processing_complete
+		       (pb.stage = 'fact_checker' AND pb.status IN ('success', 'consumed')) AS processing_complete
 		FROM episodes e
 		JOIN podcasts p ON p.id = e.podcast_id
 		JOIN pipeline_batches pb ON pb.id = e.batch_id

@@ -41,13 +41,13 @@ func (c *PgVectorClient) SearchEpisodes(ctx context.Context, vector []float64, l
 		SELECT e.id, e.title, p.title, COALESCE(e.cover_key, ''),
 		       COALESCE(p.image_url, ''),
 		       1 - (emb.embedding <=> $1::halfvec) AS score,
-		       (pb.stage = 'processing' AND pb.status IN ('success', 'consumed')) AS processing_complete
+		       (pb.stage = 'fact_checker' AND pb.status IN ('success', 'consumed')) AS processing_complete
 		FROM embeddings emb
 		JOIN episodes e ON e.id = emb.episode_id
 		JOIN podcasts p ON p.id = e.podcast_id
 		JOIN pipeline_batches pb ON pb.id = e.batch_id
 		WHERE emb.level = 'episode'
-		  AND pb.stage IN ('transcription', 'segmenting', 'processing')
+		  AND pb.stage IN ('transcription', 'segmenting', 'text_summarizer', 'emotion_scoring', 'embedder', 'fact_checker')
 		  AND pb.status IN ('success', 'consumed')
 		  AND 1 - (emb.embedding <=> $1::halfvec) >= $2
 		ORDER BY emb.embedding <=> $1::halfvec
@@ -95,7 +95,7 @@ func (c *PgVectorClient) SearchChunks(ctx context.Context, vector []float64, epi
 		JOIN pipeline_batches pb ON pb.id = e.batch_id
 		WHERE emb.level = 'chapter'
 		  AND ch.episode_id IN (%s)
-		  AND pb.stage IN ('transcription', 'segmenting', 'processing')
+		  AND pb.stage IN ('transcription', 'segmenting', 'text_summarizer', 'emotion_scoring', 'embedder', 'fact_checker')
 		  AND pb.status IN ('success', 'consumed')
 		  AND 1 - (emb.embedding <=> $1::halfvec) >= $2
 		ORDER BY emb.embedding <=> $1::halfvec
