@@ -50,7 +50,6 @@ CREATE TABLE podcasts (
 );
 
 CREATE UNIQUE INDEX uq_podcasts_guid ON podcasts(guid);
-CREATE INDEX idx_podcasts_processing_updated_at ON podcasts(processing_updated_at);
 CREATE INDEX idx_podcasts_preprocessing_updated_at ON podcasts(preprocessing_updated_at); 
 CREATE INDEX idx_podcasts_ingestion_updated_at ON podcasts(ingestion_updated_at);
 CREATE INDEX idx_podcasts_source_system_updated_at ON podcasts(source_system_updated_at);

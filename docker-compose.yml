@@ -44,7 +44,6 @@ services:
       timeout: 5s
       retries: 1
 
-
   ingestion:
     build:
       context: ./src
@@ -132,7 +131,6 @@ services:
               count: all
               capabilities: [gpu]
 
-
   processing_silver:
     build: ./src/02_processing/silver/
     depends_on:
@@ -148,13 +146,6 @@ services:
       - S3_ENDPOINT=http://minio:9000
       - POSTGRES_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASS}@postgres:5432/${POSTGRES_DB}
 
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-
   backend:
     build: ./src/backend
     ports:
@@ -164,8 +155,6 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-      ollama:
-        condition: service_started
     env_file:
       - .env
     environment:
@@ -175,12 +164,9 @@ services:
       - MINIO_PASS=${MINIO_PASS}
       - BACKEND_PORT=:8080
       - CORS_ORIGINS=http://localhost:3000
-      - OLLAMA_URL=http://ollama:11434
-      - EMBEDDING_MODEL=qwen3-embedding:4b
 
 volumes:
   postgres_data:
   minio_data:
   pgadmin_data:
-  ollama_data:
   redis_data:
