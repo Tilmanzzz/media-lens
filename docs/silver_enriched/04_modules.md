@@ -12,12 +12,12 @@ flowchart TD
 
 ## Module im Überblick
 
-| Modul                | Was es macht                                                                                     | Modell / LLM                                                                                                                                     |
-| -------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Text Summarizer**  | Fasst Kapitel- und Episoden-Transkripte automatisiert zusammen                                   | LLM via `provider` (z. B. `gemini-3.5-flash` oder lokal über `ollama`), zum Zusammenfassen                                                       |
-| **Fact Checker**     | Extrahiert Behauptungen aus dem Transkript, recherchiert sie im Web und bewertet sie mit Verdict | LLM via `provider` (`gemini`/`ollama`), je einmal zum Extrahieren, Suchanfragen generieren und Bewerten; dazu Web-Suche über `ddgs` (DuckDuckGo) |
+| Modul                | Was es macht                                                                                     | Modell / LLM                                                                                                                                                    |
+| -------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Text Summarizer**  | Fasst Kapitel- und Episoden-Transkripte automatisiert zusammen                                   | LLM via `provider` (z. B. `gemini-2.5-flash-lite` oder lokal über `ollama`), zum Zusammenfassen                                                                 |
+| **Fact Checker**     | Extrahiert Behauptungen aus dem Transkript, recherchiert sie im Web und bewertet sie mit Verdict | LLM via `provider` (`gemini`/`ollama`), je einmal zum Extrahieren, Suchanfragen generieren und Bewerten; dazu Web-Suche über `ddgs` (DuckDuckGo)                |
 | **Embedder**         | Erzeugt Vektor-Embeddings auf Podcast-, Episoden- und Kapitel-Ebene für semantische Suche        | Embedding-Modell via `provider` (`ollama` z. B. `qwen3-embedding:4b`, oder `gemini` z. B. `gemini-embedding-001`), reines Embedding-Modell, kein Chat/Reasoning |
-| **Emotion Analyser** | Klassifiziert die Emotion einzelner Transkript-Zeilen anhand des zugehörigen Audio-Ausschnitts   | `superb/wav2vec2-base-superb-er` (Hugging Face), Audio-Klassifikation, kein LLM                                                                  |
+| **Emotion Analyser** | Klassifiziert die Emotion einzelner Transkript-Zeilen anhand des zugehörigen Audio-Ausschnitts   | `superb/wav2vec2-base-superb-er` (Hugging Face), Audio-Klassifikation, kein LLM                                                                                 |
 
 ---
 
@@ -26,14 +26,14 @@ flowchart TD
 **Zweck:** Fasst Transkripte automatisiert auf zwei Ebenen zusammen, pro Kapitel und pro Episode
 (aus den Kapitel-Zusammenfassungen aggregiert).
 
-|                 |                                                                              |
-| --------------- | ---------------------------------------------------------------------------- |
-| **Input**       | `chapters.transcript`                                                        |
-| **Output**      | `episodes.summary`, `chapters.summary`                                       |
-| **LLM-Rolle**   | **LLM Summarizer**, fasst einen Text auf Vorgabe-Länge/-Stil zusammen        |
-| **Modell**      | via `provider` (`gemini` z. B. `gemini-3.5-flash`, oder lokal über `ollama`) |
-| **Kern-Klasse** | `TextSummarizer` (`text_summarizer_core.py`)                                 |
-| **Config**      | `text_summarizer_config.json`                                                |
+|                 |                                                                                   |
+| --------------- | --------------------------------------------------------------------------------- |
+| **Input**       | `chapters.transcript`                                                             |
+| **Output**      | `episodes.summary`, `chapters.summary`                                            |
+| **LLM-Rolle**   | **LLM Summarizer**, fasst einen Text auf Vorgabe-Länge/-Stil zusammen             |
+| **Modell**      | via `provider` (`gemini` z. B. `gemini-2.5-flash-lite`, oder lokal über `ollama`) |
+| **Kern-Klasse** | `TextSummarizer` (`text_summarizer_core.py`)                                      |
+| **Config**      | `text_summarizer_config.json`                                                     |
 
 ### Ablauf
 
@@ -227,12 +227,12 @@ Backoff (0.5s, 1s, 2s) erneut. Das wurde entfernt:
 Läuft `embedder` vor `text_summarizer` (oder ohne, dass je eine Summary
 existiert), gibt es auf Episoden-Ebene schlicht noch nichts zu embedden.
 
-|                 |                                                                                       |
-| --------------- | ------------------------------------------------------------------------------------- |
-| **Output**      | `embeddings` (Spalte `level` ∈ `podcast \| episode \| chapter`)                       |
+|                 |                                                                                                                                                                                        |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Output**      | `embeddings` (Spalte `level` ∈ `podcast \| episode \| chapter`)                                                                                                                        |
 | **Modell**      | via `provider`: `ollama` (lokal, z. B. `qwen3-embedding:4b`) oder `gemini` (Google Generative AI Embeddings, z. B. `gemini-embedding-001`). Kein LLM-Chat, ein reines Embedding-Modell |
-| **Kern-Klasse** | `TranscriptEmbedder` (`transcript_embedder_core.py`)                                  |
-| **Config**      | `transcript_embedder_config.json`                                                     |
+| **Kern-Klasse** | `TranscriptEmbedder` (`transcript_embedder_core.py`)                                                                                                                                   |
+| **Config**      | `transcript_embedder_config.json`                                                                                                                                                      |
 
 ### Ablauf
 
