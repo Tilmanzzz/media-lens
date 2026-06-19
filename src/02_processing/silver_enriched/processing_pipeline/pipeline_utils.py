@@ -280,6 +280,7 @@ def fetch_chunks(
             debug_message = _format_delta_debug(step, level, chunk, ctx, end_ts, batch_watermark)
             if logger is not None:
                 logger.debug(debug_message)
+            chunks.append(chunk)
 
     if logger is not None:
         mode = ctx.mode if ctx is not None else "full"
@@ -293,7 +294,6 @@ def fetch_chunks(
                 "fetch_chunks: step=%s level=%s mode=full rows=%d",
                 step, level or "-", len(rows),
             )
-            chunks.append(chunk)
 
     return chunks
 

@@ -58,14 +58,20 @@ def download_object_to_path(
     if logger is not None:
         logger.info("MinIO download start: bucket=%s object=%s target=%s", bucket_name, object_name, target_path)
 
+    tmp_path = target_path.with_name(target_path.name + ".part")
     response = minio_client.get_object(bucket_name, object_name)
     try:
-        with target_path.open("wb") as handle:
+        with tmp_path.open("wb") as handle:
             for chunk in response.stream(32 * 1024):
                 handle.write(chunk)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
     finally:
         response.close()
         response.release_conn()
+
+    os.replace(tmp_path, target_path)
 
     if logger is not None:
         logger.info("MinIO download done: bucket=%s object=%s target=%s", bucket_name, object_name, target_path)

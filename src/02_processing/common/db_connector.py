@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 import os
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 import psycopg
-import sys
-from pathlib import Path
 
 SRC_DIR = str(Path(__file__).resolve()).split("src")[0]
 if str(SRC_DIR) not in sys.path:
     sys.path.append(str(SRC_DIR))
     
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 
 class DbConnector:
@@ -51,4 +52,9 @@ class DbConnector:
 if __name__ == "__main__":
     connector = DbConnector()
     with connector.get_connection() as conn:
+        results = conn.execute(
+            "SELECT * FROM chapters"
+        ).fetchall()
+        print(results)
         print("Connected to database successfully.")
+        

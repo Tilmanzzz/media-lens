@@ -13,5 +13,8 @@
   "log_file": "emotion_analyser.log",
   "minio_bucket": "bronze",
   "audio_cache_dir": "~/.audio_lens_cache/emotion_scoring",
-  "clear_cache_before_run": true
+  "clear_cache_before_run": true,
+  "backend": "remote",
+  "remote_endpoint_url": "http://100.120.90.32:8000/predict",
+  "remote_timeout": 30.0
 }

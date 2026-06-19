@@ -25,6 +25,9 @@ class EmotionConfig:
     minio_bucket: str = "bronze"
     audio_cache_dir: str = "~/.audio_lens_cache/emotion_scoring"
     clear_cache_before_run: bool = False
+    backend: str = "local"
+    remote_endpoint_url: str = "http://100.120.90.32:8000/predict"
+    remote_timeout: float = 30.0
 
     @classmethod
     def from_file(cls, config_path: str | Path) -> "EmotionConfig":
@@ -63,4 +66,7 @@ class EmotionConfig:
             "minio_bucket": self.minio_bucket,
             "audio_cache_dir": self.audio_cache_dir,
             "clear_cache_before_run": self.clear_cache_before_run,
+            "backend": self.backend,
+            "remote_endpoint_url": self.remote_endpoint_url,
+            "remote_timeout": self.remote_timeout,
         }
