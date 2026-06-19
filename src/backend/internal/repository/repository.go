@@ -32,10 +32,15 @@ func (r *postgresEpisodeRepo) GetByID(ctx context.Context, id string) (*model.Ep
 		SELECT e.id, e.title, e.podcast_id, p.title,
 		       e.published_at, e.duration_seconds,
 		       COALESCE(e.audio_key, ''), COALESCE(e.cover_key, ''),
-		       COALESCE(e.summary, ''), e.ingested_at
+		       COALESCE(e.summary, ''), e.ingested_at,
+		       COALESCE(p.image_url, ''),
+		       (pb.stage = 'fact_checker' AND pb.status IN ('success', 'consumed')) AS processing_complete
 		FROM episodes e
 		JOIN podcasts p ON p.id = e.podcast_id
+		JOIN pipeline_batches pb ON pb.id = e.batch_id
 		WHERE e.id = $1
+		  AND pb.stage IN ('transcription', 'segmenting', 'text_summarizer', 'emotion_scoring', 'embedder', 'fact_checker')
+		  AND pb.status IN ('success', 'consumed')
 	`, id)
 
 	ep, err := scanEpisode(row)
@@ -54,8 +59,11 @@ func (r *postgresEpisodeRepo) ListPaginated(ctx context.Context, q string, curso
 	}
 
 	var whereClauses []string
-	var args []interface{}
+	var args []any
 	argIdx := 1
+
+	whereClauses = append(whereClauses, "pb.stage IN ('transcription', 'segmenting', 'text_summarizer', 'emotion_scoring', 'embedder', 'fact_checker')")
+	whereClauses = append(whereClauses, "pb.status IN ('success', 'consumed')")
 
 	if q != "" {
 		pattern := "%" + q + "%"
@@ -77,15 +85,13 @@ func (r *postgresEpisodeRepo) ListPaginated(ctx context.Context, q string, curso
 		}
 	}
 
-	whereSQL := ""
-	if len(whereClauses) > 0 {
-		whereSQL = "WHERE " + strings.Join(whereClauses, " AND ")
-	}
+	whereSQL := "WHERE " + strings.Join(whereClauses, " AND ")
 
 	countQuery := fmt.Sprintf(`
 		SELECT COUNT(*)
 		FROM episodes e
 		JOIN podcasts p ON p.id = e.podcast_id
+		JOIN pipeline_batches pb ON pb.id = e.batch_id
 		%s`, whereSQL)
 	var total int
 	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
@@ -96,9 +102,12 @@ func (r *postgresEpisodeRepo) ListPaginated(ctx context.Context, q string, curso
 		SELECT e.id, e.title, e.podcast_id, p.title,
 		       e.published_at, e.duration_seconds,
 		       COALESCE(e.audio_key, ''), COALESCE(e.cover_key, ''),
-		       COALESCE(e.summary, ''), e.ingested_at
+		       COALESCE(e.summary, ''), e.ingested_at,
+		       COALESCE(p.image_url, ''),
+		       (pb.stage = 'fact_checker' AND pb.status IN ('success', 'consumed')) AS processing_complete
 		FROM episodes e
 		JOIN podcasts p ON p.id = e.podcast_id
+		JOIN pipeline_batches pb ON pb.id = e.batch_id
 		%s
 		ORDER BY e.ingested_at DESC, e.id DESC
 		LIMIT $%d
@@ -129,7 +138,8 @@ func scanEpisode(row *sql.Row) (*model.Episode, error) {
 	var durationSeconds sql.NullInt64
 	err := row.Scan(&ep.ID, &ep.Title, &ep.PodcastID, &ep.PodcastName,
 		&ep.PublishedAt, &durationSeconds,
-		&ep.AudioKey, &ep.CoverKey, &ep.Summary, &ep.IngestedAt)
+		&ep.AudioKey, &ep.CoverKey, &ep.Summary, &ep.IngestedAt,
+		&ep.PodcastImageURL, &ep.ProcessingComplete)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +157,8 @@ func scanEpisodes(rows *sql.Rows) ([]model.Episode, error) {
 		var durationSeconds sql.NullInt64
 		if err := rows.Scan(&ep.ID, &ep.Title, &ep.PodcastID, &ep.PodcastName,
 			&ep.PublishedAt, &durationSeconds,
-			&ep.AudioKey, &ep.CoverKey, &ep.Summary, &ep.IngestedAt); err != nil {
+			&ep.AudioKey, &ep.CoverKey, &ep.Summary, &ep.IngestedAt,
+			&ep.PodcastImageURL, &ep.ProcessingComplete); err != nil {
 			return nil, fmt.Errorf("scan episode row: %w", err)
 		}
 		if durationSeconds.Valid {

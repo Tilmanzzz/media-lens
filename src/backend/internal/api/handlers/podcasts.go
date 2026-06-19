@@ -100,28 +100,32 @@ func (h *Handler) presignCoverURLs(c *gin.Context, episodes []model.Episode) map
 
 func episodeToCard(ep model.Episode, coverURLs map[string]*url.URL) model.EpisodeCard {
 	card := model.EpisodeCard{
-		ID:          ep.ID,
-		Title:       ep.Title,
-		PodcastName: ep.PodcastName,
-		PublishedAt: formatDate(ep.PublishedAt),
-		Summary:     ep.Summary,
+		ID:                 ep.ID,
+		Title:              ep.Title,
+		PodcastName:        ep.PodcastName,
+		PublishedAt:        formatDate(ep.PublishedAt),
+		Summary:            ep.Summary,
+		ProcessingComplete: ep.ProcessingComplete,
 	}
 	if ep.DurationSeconds != nil {
 		card.DurationSeconds = *ep.DurationSeconds
 	}
 	if u, ok := coverURLs[ep.CoverKey]; ok {
 		card.CoverURL = u.String()
+	} else if ep.PodcastImageURL != "" {
+		card.CoverURL = ep.PodcastImageURL
 	}
 	return card
 }
 
 func (h *Handler) episodeToDetail(c *gin.Context, ep model.Episode) model.EpisodeDetail {
 	detail := model.EpisodeDetail{
-		ID:          ep.ID,
-		Title:       ep.Title,
-		PodcastName: ep.PodcastName,
-		PublishedAt: formatDate(ep.PublishedAt),
-		Summary:     ep.Summary,
+		ID:                 ep.ID,
+		Title:              ep.Title,
+		PodcastName:        ep.PodcastName,
+		PublishedAt:        formatDate(ep.PublishedAt),
+		Summary:            ep.Summary,
+		ProcessingComplete: ep.ProcessingComplete,
 	}
 	if ep.DurationSeconds != nil {
 		detail.DurationSeconds = *ep.DurationSeconds
@@ -133,6 +137,9 @@ func (h *Handler) episodeToDetail(c *gin.Context, ep model.Episode) model.Episod
 		} else {
 			log.Printf("WARN presign cover %q: %v", ep.CoverKey, err)
 		}
+	}
+	if detail.CoverURL == "" && ep.PodcastImageURL != "" {
+		detail.CoverURL = ep.PodcastImageURL
 	}
 	return detail
 }

@@ -1,53 +1,51 @@
 "use client";
- 
+
 import { useState, useRef, useEffect } from "react";
- 
+
 interface Message {
   role: "user" | "assistant";
   content: string;
 }
- 
-interface ChatProps {
+
+interface RagChatProps {
   episodeId: string;
   placeholder?: string;
 }
- 
-export default function Chat({
+
+export default function RagChat({
   episodeId,
   placeholder = "Frag etwas zu dieser Episode...",
-}: ChatProps) {
+}: RagChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
- 
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
- 
+
   const handleSubmit = async () => {
     const query = input.trim();
     if (!query || isLoading) return;
- 
-    const userMessage: Message = { role: "user", content: query };
-    setMessages((prev) => [...prev, userMessage]);
+
+    setMessages((prev) => [...prev, { role: "user", content: query }]);
     setInput("");
     setIsLoading(true);
- 
+
     try {
-      const res = await fetch("/api/rag", {
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8080";
+      const res = await fetch(`${backendUrl}/api/v1/episodes/${episodeId}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, episodeId }),
+        body: JSON.stringify({ question: query }),
       });
- 
-      const data = await res.json();
-      const assistantMessage: Message = {
-        role: "assistant",
-        content: data.answer ?? "Keine Antwort erhalten.",
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
+
+      if (!res.ok) throw new Error(`Backend error ${res.status}`);
+
+      const data = await res.json() as { answer: string };
+      setMessages((prev) => [...prev, { role: "assistant", content: data.answer }]);
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -57,35 +55,36 @@ export default function Chat({
       setIsLoading(false);
     }
   };
- 
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
     }
   };
- 
-  // Textarea auto-resize
+
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
     const el = e.target;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   };
- 
+
+  const canSend = input.trim() && !isLoading;
+
   return (
-    <div className="flex flex-col  bg-background-card border border-border rounded-xl overflow-hidden">
- 
+    <div className="flex flex-col h-full min-h-64 bg-background-card border border-border rounded-xl overflow-hidden">
+
       {/* Nachrichtenverlauf */}
-      <div className="flex-1  px-4 py-4 flex flex-col gap-3">
+      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center gap-2 text-center py-8">
+          <div className="flex flex-col items-center justify-center h-full gap-2 text-center py-8">
             <p className="text-sm text-foreground-subtle">
               Stelle Fragen zum Inhalt dieser Episode.
             </p>
           </div>
         )}
- 
+
         {messages.map((msg, index) => (
           <div
             key={index}
@@ -102,7 +101,8 @@ export default function Chat({
             </div>
           </div>
         ))}
- 
+
+        {/* Lade-Dots während Backend antwortet */}
         {isLoading && (
           <div className="flex justify-start">
             <div className="bg-background-raised border border-border rounded-xl rounded-bl-sm px-4 py-3 flex gap-1.5 items-center">
@@ -112,10 +112,10 @@ export default function Chat({
             </div>
           </div>
         )}
- 
+
         <div ref={bottomRef} />
       </div>
- 
+
       {/* Eingabefeld */}
       <div className="border-t border-border px-3 py-3 flex gap-2 items-end bg-background-card">
         <textarea
@@ -125,11 +125,11 @@ export default function Chat({
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           rows={1}
-          className="flex-1 resize-none bg-background-raised border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-foreground-subtle focus:outline-none focus:border-primary transition-colors max-h-32 overflow-y-auto"
+          className="flex-1 resize-none bg-background-raised border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-foreground-subtle focus:outline-none focus:border-primary transition-colors max-h-32 overflow-y-auto disabled:opacity-50"
         />
         <button
           onClick={handleSubmit}
-          disabled={!input.trim() || isLoading}
+          disabled={!canSend}
           className="shrink-0 w-9 h-9 rounded-lg bg-primary hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors cursor-pointer"
           aria-label="Senden"
         >
@@ -139,7 +139,7 @@ export default function Chat({
           </svg>
         </button>
       </div>
- 
+
     </div>
   );
 }

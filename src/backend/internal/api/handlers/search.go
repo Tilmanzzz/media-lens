@@ -81,6 +81,9 @@ func (h *Handler) SemanticSearch(c *gin.Context) {
 				coverURL = u.String()
 			}
 		}
+		if coverURL == "" && ep.PodcastImageURL != "" {
+			coverURL = ep.PodcastImageURL
+		}
 
 		hl := chunksByEpisode[ep.EpisodeID]
 		if hl == nil {
