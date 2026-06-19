@@ -61,7 +61,7 @@ flowchart LR
     subgraph Step["jeder Step (01-04)"]
         SL["ctx.logger (child-Logger)\nODER eigener AppLogger.build()"]
     end
-    subgraph Modul["*_core.py (z.B. FactChecker)"]
+    subgraph Modul["*_core.py (FactChecker, TextSummarizer, TranscriptEmbedder, EmotionAnalyser)"]
         ML["checker.logger = logger\n(vom Step injiziert)"]
     end
 
@@ -78,8 +78,9 @@ flowchart LR
    Child-Logger). Wird er eigenständig aufgerufen (`python 01_pipeline_text_summarizer.py ...`),
    baut er sich seinen eigenen Logger per `AppLogger(...).build()`.
 4. **Modul-Ebene**: Der Step reicht den Logger an die fachliche Klasse weiter
-   (z. B. `checker.logger = logger`), damit auch die Kern-Logik (LLM-Aufrufe, Web-Suche, ...)
-   mitloggen kann.
+   (`checker.logger = logger`, `summarizer.logger = logger`, `embedder.logger = logger`,
+   `analyser.logger = logger`), damit auch die Kern-Logik (LLM-Aufrufe, Web-Suche,
+   Audio-Klassifikation, ...) mitloggen kann.
 
 Dadurch landen alle Log-Zeilen eines Laufs, egal ob Runner, Step oder Modul-Logik, im selben
 Format und im selben Log-Verzeichnis. Gleichzeitig ist jede Zeile eindeutig dem erzeugenden Step

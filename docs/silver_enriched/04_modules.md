@@ -312,6 +312,7 @@ Audio-Ausschnitts. Kein LLM, sondern ein spezialisiertes Audio-Klassifikationsmo
 | **Modell**       | `superb/wav2vec2-base-superb-er` (Hugging Face, Audio-Klassifikation)                     |
 | **Kern-Klasse**  | `EmotionAnalyser` (`emotion_analyser.py`)                                                 |
 | **Config**       | `emotion_analyser_config.json`                                                            |
+| **Backend**      | `local` (Modell im Prozess) oder `remote` (HTTP-Endpunkt, z. B. Spark-Device), siehe [03_parameters.md](03_parameters.md) |
 
 ### Ablauf
 
@@ -319,10 +320,27 @@ Audio-Ausschnitts. Kein LLM, sondern ein spezialisiertes Audio-Klassifikationsmo
 flowchart TD
     A[Transkript-Zeilen je Episode] --> B[Audio-Datei aus MinIO laden/cachen]
     B --> C["ffmpeg: Zeilen-Segment ausschneiden (mono, 16kHz)"]
-    C --> D["Audio Emotion Classifier<br/>(Wav2Vec2)"]
-    D --> E[Label normalisieren]
+    C --> D{backend}
+    D -->|local| D1["Audio Emotion Classifier<br/>(Wav2Vec2, im Prozess)"]
+    D -->|remote| D2["HTTP POST /predict<br/>(multipart file)"]
+    D1 --> E[Label normalisieren]
+    D2 --> E
     E --> F[(transcript_lines.emotion + emotion_score)]
 ```
+
+### Backend: `local` vs. `remote`
+
+- **`local`** (Default): Lädt `Wav2Vec2ForSequenceClassification` + `Wav2Vec2FeatureExtractor` im selben
+  Prozess (Cache unter `cache_dir`). Klassifikation läuft lokal über `torch`.
+- **`remote`**: Schickt das ausgeschnittene `.wav`-Segment per `multipart/form-data` (`file=@...`) an
+  `remote_endpoint_url`. `torch`/`transformers` werden in diesem Modus gar nicht importiert. Der
+  Endpunkt muss ein JSON-Objekt der Form
+  `{"predictions": [{"label": ..., "emotion": ..., "score": ...}, ...], "top": {"label": ..., "emotion": ..., "score": ...}}`
+  zurückgeben; ausgewertet wird `top` (Fallback: höchster `score` in `predictions`, falls `top` fehlt).
+  Damit lässt sich die Inferenz auf ein separates Gerät (z. B. ein leistungsstärkeres "Spark"-Device im
+  selben Tailscale-Netz) auslagern, ohne den Pipeline-Prozess mit GPU/Modell-Abhängigkeiten zu belasten.
+  Die `remote_endpoint_url` enthält eine interne Tailscale-IP und wird daher in der Doku nicht
+  ausgeschrieben — siehe `emotion_analyser_config.json` für den tatsächlichen Wert.
 
 ### Emotion-Labels
 
@@ -340,6 +358,16 @@ Die rohen Modell-Labels werden über `EmotionLabelCatalog` normalisiert:
 - Audio-Caching: Episoden-Audiodateien werden pro Episode nur einmal aus MinIO geladen und in
   einem lokalen Cache-Verzeichnis (`audio_cache_dir`) abgelegt. Alle Zeilen derselben Episode
   greifen auf dieselbe lokale Datei zu, nur einzelne Segmente werden per `ffmpeg` ausgeschnitten.
+  Der Cache-Dateiname wird aus dem **vollständigen** `audio_key` gebildet (Pfadtrenner durch `__`
+  ersetzt), nicht nur aus dem Basisnamen — jede Episode liegt unter
+  `{podcast_id}/{episode_guid}/audio/original.mp3` in MinIO, d. h. der reine Dateiname
+  (`original.mp3`) ist für alle Episoden identisch und würde sonst zu Cache-Kollisionen zwischen
+  unterschiedlichen Episoden führen (eine Episode bekäme stillschweigend die Audiodatei einer
+  anderen Episode zugewiesen).
+- Der Download in den Cache erfolgt atomar: Es wird zunächst in eine `.part`-Datei geschrieben und
+  erst nach erfolgreichem Abschluss per `os.replace` in den finalen Cache-Pfad verschoben
+  (`minio_utils.download_object_to_path`). Damit bleibt nach einem abgebrochenen Download nie eine
+  unvollständige Datei unter dem finalen Namen liegen, die fälschlich als gültiger Cache-Hit gilt.
 - Diese Segmente landen in einem temporären Verzeichnis (`tempfile.TemporaryDirectory`) als
   `{transcript_line_id}.wav`. Sie werden nicht in MinIO oder die DB hochgeladen, nur lokal an den
   Classifier übergeben, und nach dem Lauf automatisch gelöscht.

@@ -5,10 +5,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
-import librosa
-import torch
-from transformers import (Wav2Vec2FeatureExtractor,
-                          Wav2Vec2ForSequenceClassification)
+import requests
 
 SRC_DIR = str(Path(__file__).resolve()).split("src")[0] + "src/02_processing"
 if str(SRC_DIR) not in sys.path:
@@ -18,7 +15,7 @@ if str(SRC_DIR) not in sys.path:
 from common.app_logger import AppLogger
 
 from .emotion_config import EmotionConfig
-from .emotion_label_catalog import EmotionLabelCatalog
+from .emotion_label_catalog import EmotionLabelCatalog, _normalize_label
 
 
 class EmotionAnalyser:
@@ -46,19 +43,35 @@ class EmotionAnalyser:
 
         self.cache_dir = cache_dir
         self._setup_logger()
-        self.logger.info("Loading emotion model: %s", self.config.model_id)
 
-        self.model = Wav2Vec2ForSequenceClassification.from_pretrained(
-            self.config.model_id,
-            cache_dir=str(self.cache_dir),
-        )
-        self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(
-            self.config.model_id,
-            cache_dir=str(self.cache_dir),
-        )
-        self.emotion_catalog = EmotionLabelCatalog.from_model(self.model)
-        self.model.eval()
-        self.logger.info("Emotion model loaded successfully")
+        self.backend = (self.config.backend or "local").strip().lower()
+        if self.backend not in ("local", "remote"):
+            raise ValueError(
+                f"Unsupported emotion backend: {self.config.backend!r}. Use 'local' or 'remote'."
+            )
+
+        self.model = None
+        self.feature_extractor = None
+        self.emotion_catalog = None
+
+        if self.backend == "local":
+            self.logger.info("Loading emotion model: %s", self.config.model_id)
+            from transformers import (Wav2Vec2FeatureExtractor,
+                                      Wav2Vec2ForSequenceClassification)
+
+            self.model = Wav2Vec2ForSequenceClassification.from_pretrained(
+                self.config.model_id,
+                cache_dir=str(self.cache_dir),
+            )
+            self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(
+                self.config.model_id,
+                cache_dir=str(self.cache_dir),
+            )
+            self.emotion_catalog = EmotionLabelCatalog.from_model(self.model)
+            self.model.eval()
+            self.logger.info("Emotion model loaded successfully")
+        else:
+            self.logger.info("Using remote emotion endpoint: %s", self.config.remote_endpoint_url)
 
     def _setup_logger(self) -> None:
         log_dir = Path(self.config.log_dir)
@@ -74,6 +87,8 @@ class EmotionAnalyser:
         ).build()
 
     def available_emotions(self) -> List[Dict[str, Union[int, str]]]:
+        if self.emotion_catalog is None:
+            raise RuntimeError("available_emotions() requires backend='local'")
         self.logger.debug("Returning %d available emotion labels", len(self.emotion_catalog.as_list()))
         return self.emotion_catalog.as_list()
 
@@ -126,9 +141,27 @@ class EmotionAnalyser:
     # Wav2Vec2's first conv layer has kernel_size=10; require at least 400 samples
     _MIN_SAMPLES = 400
 
-    def score_audio(self, path: Union[str, Path]) -> Dict[str, Union[str, int, float]]:
-        self.logger.info("Scoring audio file: %s", path)
+    def score_audio(
+        self,
+        path: Union[str, Path],
+        start_time: Optional[float] = None,
+        end_time: Optional[float] = None,
+        source_audio_key: Optional[str] = None,
+    ) -> Dict[str, Union[str, int, float]]:
+        self.logger.info(
+            "Scoring audio file: %s start=%s end=%s source_audio_key=%s",
+            path, start_time, end_time, source_audio_key,
+        )
         wav_path = self.prepare_audio(path)
+
+        if self.backend == "remote":
+            return self._score_audio_remote(wav_path)
+        return self._score_audio_local(wav_path)
+
+    def _score_audio_local(self, wav_path: Path) -> Dict[str, Union[str, int, float]]:
+        import librosa
+        import torch
+
         speech_array, _ = librosa.load(str(wav_path), sr=self.config.sample_rate)
 
         if len(speech_array) < self._MIN_SAMPLES:
@@ -156,6 +189,39 @@ class EmotionAnalyser:
             "file": str(wav_path),
             "emotion": str(label),
             "emotionId": best_id,
+            "confidence": confidence,
+        }
+
+    def _score_audio_remote(self, wav_path: Path) -> Dict[str, Union[str, int, float]]:
+        self.logger.debug("Scoring via remote endpoint: %s", self.config.remote_endpoint_url)
+        try:
+            with wav_path.open("rb") as handle:
+                response = requests.post(
+                    self.config.remote_endpoint_url,
+                    files={"file": (wav_path.name, handle, "audio/wav")},
+                    timeout=self.config.remote_timeout,
+                )
+            response.raise_for_status()
+            payload = response.json()
+        except requests.RequestException as exc:
+            raise RuntimeError(f"Remote emotion endpoint request failed: {exc}") from exc
+
+        # Expected shape: {"predictions": [{"label": "ang", "emotion": "angry", "score": 0.91}, ...],
+        # "top": {"label": "ang", "emotion": "angry", "score": 0.91}}
+        best = payload.get("top") if isinstance(payload, dict) else None
+        if not isinstance(best, dict):
+            predictions = payload.get("predictions") if isinstance(payload, dict) else None
+            if not isinstance(predictions, list) or not predictions:
+                raise RuntimeError(f"Remote emotion endpoint returned no predictions: {payload!r}")
+            best = max(predictions, key=lambda item: float(item.get("score", 0.0)))
+
+        label = _normalize_label(best.get("emotion") or best.get("label"))
+        confidence = float(best.get("score", 0.0))
+
+        return {
+            "file": str(wav_path),
+            "emotion": label,
+            "emotionId": None,
             "confidence": confidence,
         }
 

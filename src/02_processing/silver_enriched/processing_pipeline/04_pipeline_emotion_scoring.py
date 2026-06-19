@@ -176,6 +176,7 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
 
         minio_client = init_minio_client()
         analyser = EmotionAnalyser()
+        analyser.logger = logger
 
         # getattr: --cache-dir only exists on this step's own parser, not on the runner's args.
         cache_dir_arg = getattr(args, "cache_dir", None) or os.environ.get("EMOTION_CACHE_DIR") or analyser.config.audio_cache_dir
@@ -204,7 +205,7 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
 
                 source_audio = local_audio_cache.get(audio_key)
                 if source_audio is None:
-                    filename = Path(audio_key).name
+                    filename = audio_key.strip("/\\").replace("/", "__").replace("\\", "__")
                     try:
                         if cache_root is not None:
                             cached_path = cache_root / filename
@@ -263,7 +264,12 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
                             line_id, episode_id, float(start_time), float(end_time),
                         )
                         _extract_line_segment(source_audio, segment_path, float(start_time), float(end_time), logger=logger)
-                        result = analyser.score_audio(segment_path)
+                        result = analyser.score_audio(
+                            segment_path,
+                            start_time=float(start_time),
+                            end_time=float(end_time),
+                            source_audio_key=audio_key,
+                        )
                     except ValueError as exc:
                         logger.warning(
                             "emotion_scoring: skipping line_id=%s episode_id=%s: %s",
