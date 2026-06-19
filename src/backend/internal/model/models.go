@@ -6,26 +6,29 @@ import (
 )
 
 type Episode struct {
-	ID              string       `json:"id"`
-	Title           string       `json:"title"`
-	PodcastID       string       `json:"podcast_id"`
-	PodcastName     string       `json:"podcast_name"`
-	PublishedAt     sql.NullTime `json:"published_at" swaggertype:"string"`
-	DurationSeconds *int         `json:"duration_seconds,omitempty"`
-	AudioKey        string       `json:"audio_key"`
-	CoverKey        string       `json:"cover_key,omitempty"`
-	Summary         string       `json:"summary,omitempty"`
-	IngestedAt      time.Time    `json:"ingested_at"`
+	ID                 string       `json:"id"`
+	Title              string       `json:"title"`
+	PodcastID          string       `json:"podcast_id"`
+	PodcastName        string       `json:"podcast_name"`
+	PublishedAt        sql.NullTime `json:"published_at" swaggertype:"string"`
+	DurationSeconds    *int         `json:"duration_seconds,omitempty"`
+	AudioKey           string       `json:"audio_key"`
+	CoverKey           string       `json:"cover_key,omitempty"`
+	Summary            string       `json:"summary,omitempty"`
+	IngestedAt         time.Time    `json:"ingested_at"`
+	PodcastImageURL    string       `json:"-"`
+	ProcessingComplete bool         `json:"processing_complete"`
 }
 
 type EpisodeCard struct {
-	ID              string `json:"id"`
-	Title           string `json:"title"`
-	PodcastName     string `json:"podcast_name"`
-	DurationSeconds int    `json:"duration_seconds"`
-	PublishedAt     string `json:"published_at"`
-	CoverURL        string `json:"cover_url"`
-	Summary         string `json:"summary"`
+	ID                 string `json:"id"`
+	Title              string `json:"title"`
+	PodcastName        string `json:"podcast_name"`
+	DurationSeconds    int    `json:"duration_seconds"`
+	PublishedAt        string `json:"published_at"`
+	CoverURL           string `json:"cover_url"`
+	Summary            string `json:"summary"`
+	ProcessingComplete bool   `json:"processing_complete"`
 }
 
 type EpisodeListResponse struct {
@@ -35,13 +38,14 @@ type EpisodeListResponse struct {
 }
 
 type EpisodeDetail struct {
-	ID              string `json:"id"`
-	Title           string `json:"title"`
-	PodcastName     string `json:"podcast_name"`
-	DurationSeconds int    `json:"duration_seconds"`
-	PublishedAt     string `json:"published_at"`
-	CoverURL        string `json:"cover_url"`
-	Summary         string `json:"summary"`
+	ID                 string `json:"id"`
+	Title              string `json:"title"`
+	PodcastName        string `json:"podcast_name"`
+	DurationSeconds    int    `json:"duration_seconds"`
+	PublishedAt        string `json:"published_at"`
+	CoverURL           string `json:"cover_url"`
+	Summary            string `json:"summary"`
+	ProcessingComplete bool   `json:"processing_complete"`
 }
 
 type EpisodeDetailResponse struct {
