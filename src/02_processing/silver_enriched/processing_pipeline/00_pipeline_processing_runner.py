@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import copy
 import importlib.util
+import os
 import signal
 import sys
 import threading
@@ -17,8 +18,8 @@ if str(SRC_DIR) not in sys.path:
 from common.app_logger import child_logger
 from common.db_connector import DbConnector
 from silver_enriched.processing_pipeline.pipeline_utils import (
-    LoadContext, build_pipeline_logger, fetch_db_now, has_new_preprocessed_data,
-    load_json_config)
+    LoadContext, build_pipeline_logger, fetch_db_now,
+    has_new_preprocessed_data, load_json_config)
 
 # Steps that touch disjoint source/target tables and can run concurrently.
 # embedder is intentionally excluded: it depends on text_summarizer's output.
@@ -27,9 +28,20 @@ PARALLEL_STEPS = ("text_summarizer", "fact_checker", "emotion_scoring")
 # Set by the SIGINT/SIGTERM handler so a sleeping poll loop wakes up and exits
 # immediately instead of waiting out the rest of the interval.
 _shutdown_event = threading.Event()
+_shutdown_requests = 0
 
 
 def _request_shutdown(signum, frame) -> None:
+    global _shutdown_requests
+    _shutdown_requests += 1
+    if _shutdown_requests >= 2:
+        print("pipeline: second interrupt received, forcing immediate exit", file=sys.stderr)
+        os._exit(1)
+    print(
+        "pipeline: shutdown requested, finishing the current run (if any) then "
+        "stopping - press Ctrl+C again to force-quit immediately",
+        file=sys.stderr,
+    )
     _shutdown_event.set()
 
 
