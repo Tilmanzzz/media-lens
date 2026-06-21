@@ -18,6 +18,8 @@ Beide lassen sich kombinieren: CLI-Argumente können auch aus einer JSON-Datei v
 | `--batch-id`           | `None`                                                  | Optionaler, vorgegebener Batch (siehe Glossar)                                                                                                                               |
 | `--max-workers`        | `None` (automatisch)                                    | Begrenzt, wie viele Steps gleichzeitig laufen dürfen (Orchestrierungs-Ebene). `None` = automatisch eine pro parallelem Step (siehe [01_architecture.md](01_architecture.md)) |
 | `--dry-run`            | `False`                                                 | Wenn gesetzt: keine DB-Schreibvorgänge, kein Batch-Eintrag                                                                                                                   |
+| `--poll`               | `False`                                                 | Self-Triggering: Prozess bleibt laufen und startet einen Durchlauf selbst, sobald `segmenting` neue Daten geschrieben hat (siehe [01_architecture.md](01_architecture.md))   |
+| `--poll-interval`      | `60`                                                    | Sekunden zwischen zwei Prüfungen im Poll-Modus                                                                                                                               |
 | `--testing`            | `False`                                                 | Schaltet die Testfilter unten frei                                                                                                                                           |
 | `--test-episode-id`    | `None`                                                  | Test: nur diese eine Episode verarbeiten                                                                                                                                     |
 | `--test-chapter-limit` | `3`                                                     | Test: max. Anzahl Kapitel dieser Episode                                                                                                                                     |
@@ -40,6 +42,8 @@ vom Runner aufgerufen werden.
   "max_workers": null,
   "dry_run": false,
   "steps": "text_summarizer,fact_checker,embedder,emotion_scoring",
+  "poll": false,
+  "poll_interval": 60,
   "testing": false,
   "test_episode_id": null,
   "test_chapter_limit": null,

@@ -180,6 +180,74 @@ sequenceDiagram
   eigene Transaktion hat und auf disjunkte Tabellen schreibt, lassen sich die Steps gefahrlos
   parallel ausführen. Der gemeinsame `LoadContext` wird nur lesend geteilt.
 
+## Poll-Modus: Self-Triggering (`--poll`)
+
+Mit `--poll` läuft der Runner dauerhaft weiter, statt sich nach einem Durchlauf zu beenden, und
+entscheidet selbst, wann ein neuer Durchlauf nötig ist.
+
+```mermaid
+flowchart TD
+    Start([Start --poll]) --> Check{has_new_preprocessed_data?}
+    Check -->|ja| Run[run_pipeline: ein Durchlauf]
+    Run --> Sleep
+    Check -->|nein| Sleep[_shutdown_event.wait poll_interval]
+    Sleep -->|Intervall abgelaufen| Check
+    Sleep -->|SIGINT/SIGTERM| Stop([Loop beenden])
+```
+
+**Ablauf pro Tick:**
+- DB-Abfrage statt Event/Listener: kein zusätzlicher Broker, nur ein Schlaf-Intervall
+  (`--poll-interval`, Sekunden) plus eine SQL-Abfrage.
+- Trigger-Bedingung (`has_new_preprocessed_data`): hat `segmenting` seit dem letzten
+  erfolgreichen Processing-Lauf etwas Neues geschrieben?
+- Bei "ja": ein voller Durchlauf (`run_pipeline`), danach normal weiter schlafen.
+- Bei "nein": einfach weiter schlafen.
+
+**Warum nur `segmenting` geprüft wird, nicht `transcription`:**
+- `segmenting` ist der einzige Schreiber von `preprocessing_updated_at` auf
+  `chapters`/`transcript_lines`/`episodes`/`podcasts` — genau die Spalten, gegen die jeder
+  Processing-Step seine Delta-Auswahl filtert (siehe [02_load_strategy.md](02_load_strategy.md)).
+  `transcription` rührt diese Spalten nie an.
+- Ein `segmenting`-Batch erreicht `success` erst, nachdem sein `transcription`-Batch schon auf
+  `consumed` gesetzt wurde (`claim_batch_episodes()` in `sectioning/main.py`, vor der eigentlichen
+  Verarbeitung). Ein erfolgreicher `segmenting`-Batch beweist also automatisch, dass die
+  `transcription`-Arbeit dahinter schon fertig ist. `transcription` separat zu prüfen wäre
+  redundant und würde unnötige Läufe auslösen (z. B. während `transcription` an neuen Episoden
+  arbeitet, die noch keine Zeile in `chapters` haben).
+
+**Die Abfrage (`pipeline_utils.fetch_latest_batch_start_ts`):**
+```sql
+SELECT MAX(start_ts)
+FROM pipeline_batches
+WHERE stage::text = ANY(%s) AND status::text = ANY(%s)
+```
+
+| Seite | Stage(s) | Status | Spalte |
+|---|---|---|---|
+| Preprocessing | `segmenting` | `success`, `consumed` | `MAX(start_ts)` |
+| Processing | `text_summarizer`, `fact_checker`, `embedder`, `emotion_scoring` | `success` | `MAX(start_ts)` |
+
+- `start_ts`, nicht `fin_ts` — gleiche Definition wie `fetch_stage_watermark` überall sonst im
+  Modul ("wie weit ist diese Stage" = `MAX(start_ts)` ihrer erfolgreichen Läufe).
+- Getriggert wird, wenn Preprocessing-Zeitstempel > Processing-Zeitstempel (oder noch nie
+  erfolgreich verarbeitet wurde).
+- `pending`/`failed`-Batches fallen vor dem `MAX()` durch den Status-Filter raus — ein laufender
+  oder gescheiterter Batch kann nie als "fertig" gelten.
+
+**Graceful Shutdown (SIGINT/SIGTERM):**
+- `SIGINT` = Strg+C im Terminal. `SIGTERM` = die "höfliche" Stop-Anfrage, die z. B.
+  `docker stop`, `kill <pid>` oder Kubernetes beim Beenden schicken.
+- Beide werden auf einen Handler gelegt, der nur ein `threading.Event` setzt:
+  ```python
+  signal.signal(signal.SIGINT, _request_shutdown)
+  signal.signal(signal.SIGTERM, _request_shutdown)
+  ```
+- Geschlafen wird mit `_shutdown_event.wait(poll_interval)` statt `time.sleep(...)` — das
+  kehrt sofort zurück, sobald das Event gesetzt wird, statt das volle Intervall abzuwarten.
+- Ein gerade laufender `run_pipeline(...)`-Durchlauf wird dabei nicht mitten im DB-Write
+  abgebrochen; das Signal wirkt erst, sobald der Durchlauf fertig ist und der Loop wieder oben
+  ankommt.
+
 ## CLI-Einstiegspunkte (Übersicht)
 
 | Datei | Zweck |

@@ -18,6 +18,12 @@ from .emotion_config import EmotionConfig
 from .emotion_label_catalog import EmotionLabelCatalog, _normalize_label
 
 
+class RemoteEmotionEndpointUnavailable(RuntimeError):
+    """Raised when the remote emotion backend can't be reached at all (vs. a
+    single bad request/response), so callers can fail the whole run instead of
+    skipping line by line."""
+
+
 class EmotionAnalyser:
     def __init__(
         self,
@@ -203,6 +209,13 @@ class EmotionAnalyser:
                 )
             response.raise_for_status()
             payload = response.json()
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            # The endpoint itself is unreachable, not just this one file - every
+            # remaining line would fail the exact same way, so callers should treat
+            # this as fatal for the whole run instead of skipping line by line.
+            raise RemoteEmotionEndpointUnavailable(
+                f"Remote emotion endpoint unreachable ({self.config.remote_endpoint_url}): {exc}"
+            ) from exc
         except requests.RequestException as exc:
             raise RuntimeError(f"Remote emotion endpoint request failed: {exc}") from exc
 
