@@ -210,9 +210,6 @@ class EmotionAnalyser:
             response.raise_for_status()
             payload = response.json()
         except (requests.ConnectionError, requests.Timeout) as exc:
-            # The endpoint itself is unreachable, not just this one file - every
-            # remaining line would fail the exact same way, so callers should treat
-            # this as fatal for the whole run instead of skipping line by line.
             raise RemoteEmotionEndpointUnavailable(
                 f"Remote emotion endpoint unreachable ({self.config.remote_endpoint_url}): {exc}"
             ) from exc
