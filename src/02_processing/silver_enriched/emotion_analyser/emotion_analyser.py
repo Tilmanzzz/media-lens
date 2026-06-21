@@ -234,7 +234,3 @@ class EmotionAnalyser:
             "emotionId": None,
             "confidence": confidence,
         }
-
-
-# Backward compatible alias.
-EmotionScorer = EmotionAnalyser

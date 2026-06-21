@@ -1,0 +1,2117 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>media-lens · Architektur</title>
+    <style>
+      :root {
+        --bg0: #0a1320;
+        --bg1: #0f2235;
+        --bg2: #14304a;
+        --ink: #eaf3fb;
+        --muted: #a8bccf;
+        --faint: #7790a6;
+        --teal: #2e86ab;
+        --teal2: #5cc6ef;
+        --orange: #f29b5b;
+        --orange2: #ffb877;
+        --green: #6fb883;
+        --violet: #9b8cff;
+        --glass: rgba(255, 255, 255, 0.05);
+        --glass2: rgba(255, 255, 255, 0.08);
+        --line: rgba(255, 255, 255, 0.13);
+        --line2: rgba(255, 255, 255, 0.24);
+        --shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+        --r: 18px;
+        --font:
+          "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial,
+          sans-serif;
+        --mono: "Cascadia Code", "Consolas", "SF Mono", monospace;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        font-family: var(--font);
+        color: var(--ink);
+        overflow: hidden;
+        background:
+          radial-gradient(
+            1200px 700px at 12% -8%,
+            rgba(46, 134, 171, 0.2),
+            transparent 60%
+          ),
+          radial-gradient(
+            1000px 650px at 105% 10%,
+            rgba(242, 155, 91, 0.14),
+            transparent 55%
+          ),
+          radial-gradient(
+            900px 800px at 50% 120%,
+            rgba(111, 184, 131, 0.1),
+            transparent 55%
+          ),
+          linear-gradient(160deg, var(--bg0), var(--bg1) 55%, var(--bg2));
+      }
+
+      .deck {
+        position: fixed;
+        inset: 0;
+      }
+      .slide {
+        position: absolute;
+        inset: 0;
+        padding: 50px 60px 76px;
+        display: flex;
+        flex-direction: column;
+        opacity: 0;
+        transform: translateX(40px) scale(0.985);
+        transition:
+          opacity 0.5s ease,
+          transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
+        pointer-events: none;
+        overflow: auto;
+      }
+      .slide.active {
+        opacity: 1;
+        transform: none;
+        pointer-events: auto;
+      }
+      .slide.prev {
+        transform: translateX(-40px) scale(0.985);
+      }
+
+      .kicker {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 6px;
+      }
+      .kicker .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--teal2);
+        box-shadow: 0 0 14px var(--teal2);
+      }
+      .kicker span {
+        font-size: 13px;
+        letter-spacing: 0.26em;
+        text-transform: uppercase;
+        color: var(--faint);
+        font-weight: 600;
+      }
+      h1.title {
+        font-size: 38px;
+        font-weight: 800;
+        letter-spacing: -0.4px;
+        line-height: 1.1;
+        background: linear-gradient(92deg, #fff, #bfe6f7 55%, #9fd0ec);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      .subtitle {
+        color: var(--muted);
+        font-size: 16.5px;
+        margin-top: 9px;
+        max-width: 1040px;
+        line-height: 1.5;
+      }
+      .titlebar {
+        margin-bottom: 24px;
+        flex: 0 0 auto;
+      }
+      .titlebar::after {
+        content: "";
+        display: block;
+        width: 74px;
+        height: 4px;
+        border-radius: 3px;
+        margin-top: 16px;
+        background: linear-gradient(90deg, var(--teal2), var(--teal));
+        box-shadow: 0 0 18px rgba(92, 198, 239, 0.5);
+      }
+
+      .body {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+
+      .nav {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 56px;
+        padding: 0 26px;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        z-index: 50;
+        background: linear-gradient(0deg, rgba(8, 15, 25, 0.85), transparent);
+      }
+      .progress {
+        position: fixed;
+        left: 0;
+        top: 0;
+        height: 3px;
+        z-index: 60;
+        background: linear-gradient(90deg, var(--teal2), var(--orange));
+        box-shadow: 0 0 12px rgba(92, 198, 239, 0.6);
+        transition: width 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+      }
+      .nav .btn {
+        appearance: none;
+        border: 1px solid var(--line2);
+        background: var(--glass2);
+        color: var(--ink);
+        width: 38px;
+        height: 38px;
+        border-radius: 11px;
+        font-size: 18px;
+        cursor: pointer;
+        transition: 0.2s;
+        display: grid;
+        place-items: center;
+      }
+      .nav .btn:hover {
+        background: var(--teal);
+        border-color: var(--teal);
+        transform: translateY(-1px);
+      }
+      .nav .count {
+        font-variant-numeric: tabular-nums;
+        color: var(--muted);
+        font-size: 14px;
+        min-width: 54px;
+      }
+      .nav .label {
+        color: var(--faint);
+        font-size: 13px;
+        margin-left: auto;
+        letter-spacing: 0.04em;
+      }
+      .dots {
+        display: flex;
+        gap: 7px;
+        align-items: center;
+      }
+      .dots i {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--line2);
+        cursor: pointer;
+        transition: 0.2s;
+      }
+      .dots i.on {
+        background: var(--teal2);
+        box-shadow: 0 0 10px var(--teal2);
+        transform: scale(1.25);
+      }
+
+      .grid {
+        display: grid;
+        gap: 18px;
+      }
+      .card {
+        background: var(--glass);
+        border: 1px solid var(--line);
+        border-radius: var(--r);
+        padding: 18px 22px;
+        backdrop-filter: blur(6px);
+        box-shadow: var(--shadow);
+      }
+      .card h3 {
+        font-size: 16.5px;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .card p,
+      .card li {
+        color: var(--muted);
+        font-size: 14.5px;
+        line-height: 1.6;
+      }
+      .card .ico {
+        font-size: 20px;
+      }
+      .pill {
+        display: inline-block;
+        padding: 3px 11px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        border: 1px solid var(--line2);
+        color: var(--muted);
+        background: var(--glass2);
+      }
+      .tag-teal {
+        color: #bfeaff;
+        border-color: rgba(92, 198, 239, 0.4);
+        background: rgba(46, 134, 171, 0.16);
+      }
+      .tag-orange {
+        color: #ffd9b8;
+        border-color: rgba(242, 155, 91, 0.45);
+        background: rgba(242, 155, 91, 0.14);
+      }
+      .tag-green {
+        color: #cdeed6;
+        border-color: rgba(111, 184, 131, 0.45);
+        background: rgba(111, 184, 131, 0.14);
+      }
+      b,
+      strong {
+        color: var(--ink);
+        font-weight: 700;
+      }
+      code {
+        font-family: var(--mono);
+        font-size: 0.9em;
+        background: rgba(0, 0, 0, 0.35);
+        border: 1px solid var(--line);
+        padding: 1px 6px;
+        border-radius: 6px;
+        color: #cfe8ff;
+      }
+
+      /* HERO */
+      .hero {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: flex-start;
+      }
+      .hero .logo {
+        font-size: 15px;
+        letter-spacing: 0.4em;
+        color: var(--faint);
+        text-transform: uppercase;
+        margin-bottom: 18px;
+      }
+      .hero h1 {
+        font-size: 72px;
+        font-weight: 900;
+        letter-spacing: -2px;
+        line-height: 1;
+        background: linear-gradient(95deg, #fff, #9fd0ec 60%, #5cc6ef);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      .hero .lead {
+        font-size: 21px;
+        color: var(--muted);
+        margin-top: 20px;
+        max-width: 780px;
+        line-height: 1.55;
+      }
+      .hero .chips {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-top: 32px;
+      }
+      .hero .chip {
+        padding: 9px 16px;
+        border-radius: 12px;
+        border: 1px solid var(--line2);
+        background: var(--glass2);
+        font-size: 14px;
+        color: var(--ink);
+        display: flex;
+        gap: 9px;
+        align-items: center;
+      }
+      .hint {
+        position: fixed;
+        right: 24px;
+        bottom: 68px;
+        color: var(--faint);
+        font-size: 12.5px;
+        z-index: 40;
+      }
+      .kbd {
+        font-family: var(--mono);
+        border: 1px solid var(--line2);
+        border-bottom-width: 2px;
+        border-radius: 6px;
+        padding: 1px 7px;
+        color: var(--muted);
+      }
+
+      /* ARCHITECTURE */
+      .arch {
+        position: relative;
+        width: 100%;
+        padding-top: 46px;
+        padding-bottom: 150px;
+      }
+      .arch svg.wires {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 1;
+        pointer-events: none;
+        overflow: visible;
+      }
+      .server {
+        position: relative;
+        z-index: 2;
+        border-radius: 24px;
+        padding: 44px 26px 26px;
+        background: linear-gradient(
+          180deg,
+          rgba(46, 134, 171, 0.09),
+          rgba(46, 134, 171, 0.03)
+        );
+        border: 1.5px solid rgba(92, 198, 239, 0.3);
+        box-shadow: inset 0 0 70px rgba(46, 134, 171, 0.05);
+      }
+      .server .badge {
+        position: absolute;
+        top: -16px;
+        left: 26px;
+        padding: 8px 18px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #11314c, #16466b);
+        border: 1px solid rgba(92, 198, 239, 0.5);
+        font-size: 13.5px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        color: #cfeaff;
+        display: flex;
+        gap: 9px;
+        align-items: center;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      }
+      .pipe {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 13px;
+      }
+      .node {
+        position: relative;
+        z-index: 2;
+        background: var(--glass2);
+        border: 1px solid var(--line2);
+        border-radius: 15px;
+        padding: 16px 10px 14px;
+        text-align: center;
+        transition:
+          transform 0.25s,
+          box-shadow 0.25s;
+        backdrop-filter: blur(4px);
+        min-height: 116px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+      }
+      .node:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 16px 34px rgba(0, 0, 0, 0.4);
+      }
+      .node .ni {
+        font-size: 26px;
+        line-height: 1;
+        margin-bottom: 10px;
+      }
+      .node .nt {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--ink);
+      }
+      .node .ns {
+        font-size: 11.5px;
+        color: var(--faint);
+        margin-top: 5px;
+        line-height: 1.35;
+      }
+      .node .spark-chip {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        font-size: 11px;
+        padding: 2px 7px;
+        border-radius: 999px;
+        background: rgba(242, 155, 91, 0.18);
+        border: 1px solid rgba(242, 155, 91, 0.55);
+        color: #ffd9b8;
+        font-weight: 700;
+      }
+      .node .src-chip {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        font-size: 11px;
+        padding: 2px 7px;
+        border-radius: 999px;
+        background: rgba(155, 140, 255, 0.18);
+        border: 1px solid rgba(155, 140, 255, 0.55);
+        color: #ded7ff;
+        font-weight: 700;
+      }
+      .pipedetail {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 13px;
+        margin-top: 13px;
+      }
+      .pd {
+        font-size: 11.5px;
+        color: var(--muted);
+        text-align: center;
+        line-height: 1.45;
+        padding: 0 2px;
+      }
+      .pd .pdo {
+        color: #ffd0a8;
+        font-weight: 600;
+      }
+
+      .ext {
+        position: relative;
+        z-index: 3;
+        border-radius: 15px;
+        padding: 13px 18px;
+        text-align: center;
+        backdrop-filter: blur(4px);
+      }
+      .ext .et {
+        font-size: 14.5px;
+        font-weight: 800;
+        color: var(--ink);
+        display: flex;
+        gap: 9px;
+        align-items: center;
+        justify-content: center;
+      }
+      .ext .es {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 4px;
+        line-height: 1.4;
+      }
+      .ext.podcast {
+        background: linear-gradient(
+          180deg,
+          rgba(155, 140, 255, 0.18),
+          rgba(155, 140, 255, 0.05)
+        );
+        border: 1px solid rgba(155, 140, 255, 0.5);
+      }
+      .ext.spark {
+        background: linear-gradient(
+          180deg,
+          rgba(242, 155, 91, 0.2),
+          rgba(242, 155, 91, 0.06)
+        );
+        border: 1px solid rgba(242, 155, 91, 0.6);
+        box-shadow: 0 0 30px rgba(242, 155, 91, 0.16);
+      }
+
+      .legend {
+        display: flex;
+        gap: 22px;
+        margin-top: 20px;
+        flex-wrap: wrap;
+        font-size: 12.5px;
+        color: var(--muted);
+        justify-content: center;
+      }
+      .legend span {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .legend i {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 4px;
+      }
+      .flowdash {
+        stroke-dasharray: 7 9;
+        animation: flow 1.1s linear infinite;
+      }
+      @keyframes flow {
+        to {
+          stroke-dashoffset: -32;
+        }
+      }
+
+      /* layered silver */
+      .layers {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .layer {
+        display: grid;
+        grid-template-columns: 170px 1fr;
+        gap: 18px;
+        align-items: center;
+        background: var(--glass);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 15px 20px;
+        position: relative;
+      }
+      .layer .lh {
+        font-weight: 800;
+        font-size: 15px;
+        color: var(--ink);
+      }
+      .layer .lh small {
+        display: block;
+        color: var(--faint);
+        font-weight: 600;
+        font-family: var(--mono);
+        font-size: 11px;
+        margin-top: 4px;
+      }
+      .layer .lc {
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.55;
+      }
+      .chev {
+        position: absolute;
+        left: 50%;
+        bottom: -20px;
+        transform: translateX(-50%);
+        color: var(--teal2);
+        font-size: 18px;
+        z-index: 3;
+      }
+      .modgrid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 14px;
+      }
+      .mod {
+        background: var(--glass);
+        border: 1px solid var(--line);
+        border-radius: 15px;
+        padding: 16px 17px;
+        position: relative;
+        overflow: hidden;
+      }
+      .mod::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: var(--teal);
+      }
+      .mod.m1::before {
+        background: linear-gradient(90deg, #5cc6ef, #2e86ab);
+      }
+      .mod.m2::before {
+        background: linear-gradient(90deg, #ffb877, #f29b5b);
+      }
+      .mod.m3::before {
+        background: linear-gradient(90deg, #9b8cff, #6f5cff);
+      }
+      .mod.m4::before {
+        background: linear-gradient(90deg, #7ee0a0, #6fb883);
+      }
+      .mod .mt {
+        font-weight: 800;
+        font-size: 15px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .mod .mio {
+        font-size: 12.5px;
+        color: var(--muted);
+        margin-top: 11px;
+        line-height: 1.55;
+      }
+      .io {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 7px;
+      }
+      .io .k {
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--faint);
+        font-weight: 700;
+        min-width: 34px;
+      }
+      .io .v {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: #cfe8ff;
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid var(--line);
+        padding: 2px 7px;
+        border-radius: 6px;
+      }
+
+      .two {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+        align-items: start;
+      }
+      .three {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 18px;
+      }
+      .flow-v {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+      }
+      .step {
+        display: flex;
+        align-items: center;
+        gap: 13px;
+        background: var(--glass);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px 16px;
+        font-size: 14.5px;
+      }
+      .step .num {
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+        background: var(--teal);
+        color: #fff;
+        display: grid;
+        place-items: center;
+        font-weight: 800;
+        font-size: 13px;
+        flex: 0 0 auto;
+      }
+      .step.accent {
+        border-color: rgba(92, 198, 239, 0.5);
+        background: linear-gradient(
+          90deg,
+          rgba(46, 134, 171, 0.16),
+          transparent
+        );
+      }
+      .step.orange .num {
+        background: var(--orange);
+      }
+      .arrow-d {
+        color: var(--faint);
+        text-align: center;
+        font-size: 14px;
+        margin: -1px 0;
+      }
+
+      /* runner parallel block */
+      .par3 {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 14px;
+      }
+      .pcard {
+        background: linear-gradient(
+          180deg,
+          rgba(46, 134, 171, 0.16),
+          rgba(46, 134, 171, 0.04)
+        );
+        border: 1px solid rgba(92, 198, 239, 0.4);
+        border-radius: 13px;
+        padding: 15px;
+        text-align: center;
+        font-size: 14.5px;
+        font-weight: 700;
+      }
+      .embcard {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        max-width: 560px;
+        margin: 0 auto;
+        background: linear-gradient(
+          90deg,
+          rgba(242, 155, 91, 0.16),
+          rgba(242, 155, 91, 0.04)
+        );
+        border: 1px solid rgba(242, 155, 91, 0.5);
+        border-radius: 14px;
+        padding: 16px 20px;
+      }
+      .embcard .eico {
+        font-size: 26px;
+      }
+      .embcard .etx b {
+        font-size: 15.5px;
+        color: var(--ink);
+      }
+      .embcard .etx span {
+        display: block;
+        color: var(--muted);
+        font-size: 13px;
+        margin-top: 3px;
+      }
+
+      /* table */
+      table.wm {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13.5px;
+        overflow: hidden;
+        border-radius: 12px;
+      }
+      table.wm th {
+        background: #11314c;
+        color: #cfeaff;
+        text-align: left;
+        padding: 11px 14px;
+        font-weight: 700;
+        font-size: 12.5px;
+        letter-spacing: 0.02em;
+      }
+      table.wm td {
+        padding: 10px 14px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+      }
+      table.wm td:first-child {
+        color: var(--ink);
+        font-weight: 600;
+      }
+      table.wm code {
+        font-size: 12px;
+      }
+      table.wm tr.embed td {
+        background: rgba(111, 184, 131, 0.08);
+      }
+      .codeblk {
+        font-family: var(--mono);
+        font-size: 13px;
+        background: rgba(0, 0, 0, 0.4);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 16px 18px;
+        line-height: 1.7;
+        color: #dbe9f6;
+        white-space: pre;
+      }
+      .codeblk .kw {
+        color: #7fb4ff;
+      }
+      .codeblk .st {
+        color: #ffb877;
+      }
+      .codeblk .cm {
+        color: #6a8aa8;
+      }
+      .note {
+        background: linear-gradient(
+          180deg,
+          rgba(242, 155, 91, 0.12),
+          rgba(242, 155, 91, 0.04)
+        );
+        border: 1px solid rgba(242, 155, 91, 0.38);
+        border-radius: 14px;
+        padding: 15px 19px;
+        font-size: 14px;
+        color: #ffe6cf;
+        line-height: 1.6;
+      }
+      .note b {
+        color: #fff;
+      }
+      ul.clean {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 11px;
+      }
+      ul.clean li {
+        position: relative;
+        padding-left: 23px;
+        color: var(--muted);
+        font-size: 14.5px;
+        line-height: 1.55;
+      }
+      ul.clean li::before {
+        content: "▸";
+        position: absolute;
+        left: 0;
+        color: var(--teal2);
+      }
+
+      /* poll loop */
+      .loop {
+        display: grid;
+        grid-template-columns: 1.05fr 1fr;
+        gap: 28px;
+        align-items: center;
+      }
+      .loopflow {
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+        align-items: center;
+      }
+      .lp {
+        width: 100%;
+        max-width: 360px;
+        border-radius: 13px;
+        padding: 13px 16px;
+        text-align: center;
+        font-size: 14.5px;
+        border: 1px solid var(--line2);
+        position: relative;
+      }
+      .lp.start {
+        background: #11314c;
+        color: #cfeaff;
+        font-weight: 700;
+      }
+      .lp.q {
+        background: linear-gradient(
+          180deg,
+          rgba(242, 155, 91, 0.2),
+          rgba(242, 155, 91, 0.06)
+        );
+        border-color: rgba(242, 155, 91, 0.55);
+        font-weight: 700;
+        color: #ffe2c6;
+      }
+      .lp.run {
+        background: linear-gradient(
+          180deg,
+          rgba(92, 198, 239, 0.22),
+          rgba(46, 134, 171, 0.1)
+        );
+        border-color: rgba(92, 198, 239, 0.6);
+        color: #eaf8ff;
+        font-weight: 700;
+      }
+      .lp.wait {
+        background: var(--glass2);
+      }
+      .lp small {
+        display: block;
+        color: var(--faint);
+        font-size: 11.5px;
+        margin-top: 4px;
+      }
+      .loopflow .a {
+        color: var(--teal2);
+        font-size: 16px;
+        margin: -2px 0;
+      }
+      .cmp {
+        display: flex;
+        align-items: stretch;
+        gap: 14px;
+        justify-content: center;
+        margin: 12px 0;
+      }
+      .cmp .side {
+        flex: 1;
+        background: var(--glass);
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        padding: 14px;
+        text-align: center;
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+      .cmp .side b {
+        display: block;
+        color: var(--ink);
+        margin-bottom: 7px;
+        font-size: 13px;
+      }
+      .cmp .gt {
+        align-self: center;
+        font-size: 30px;
+        font-weight: 900;
+        color: var(--teal2);
+      }
+
+      .small {
+        font-size: 12.5px;
+        color: var(--faint);
+      }
+      .mt8 {
+        margin-top: 8px;
+      }
+      .mt14 {
+        margin-top: 14px;
+      }
+      .mt18 {
+        margin-top: 18px;
+      }
+      @media (max-width: 1180px) {
+        .slide {
+          padding: 36px 34px 76px;
+        }
+        h1.title {
+          font-size: 31px;
+        }
+        .hero h1 {
+          font-size: 52px;
+        }
+        .node .nt {
+          font-size: 12.5px;
+        }
+        .node .ni {
+          font-size: 22px;
+        }
+        .pd {
+          font-size: 10.5px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="progress" id="prog"></div>
+    <div class="deck" id="deck">
+      <!-- 0 HERO -->
+      <section class="slide">
+        <div class="hero">
+          <div class="logo">media-lens</div>
+          <h1>Architektur<br />im Überblick</h1>
+          <p class="lead">
+            Eine Daten-Pipeline, die Podcasts einsammelt, transkribiert, in
+            Kapitel zerlegt und mit KI anreichert, bis hin zur semantischen
+            Suche im Frontend.
+          </p>
+          <div class="chips">
+            <div class="chip">🏛️ Alles auf einem HdM-Server</div>
+            <div class="chip">⚡ KI-Modelle auf externem Spark-Server</div>
+            <div class="chip">✨ Fokus: Silver-Enriched-Schicht</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 1 GESAMTARCHITEKTUR -->
+      <section class="slide">
+        <div class="titlebar">
+          <div class="kicker">
+            <span class="dot"></span><span>Gesamtarchitektur</span>
+          </div>
+          <h1 class="title">Vom Podcast-Feed bis zur Such-Oberfläche</h1>
+          <p class="subtitle">
+            Alle Module laufen auf dem <b>HdM-Server</b>. Die rechenintensiven
+            KI-Modelle liegen auf einem externen <b>Spark-Server</b>,
+            angesprochen per HTTP, vernetzt über Tailscale.
+          </p>
+        </div>
+        <div class="body">
+          <div class="arch" id="arch">
+            <svg class="wires" id="wires">
+              <defs>
+                <marker
+                  id="ah-teal"
+                  markerWidth="9"
+                  markerHeight="9"
+                  refX="7"
+                  refY="4.5"
+                  orient="auto"
+                >
+                  <path d="M0,0 L9,4.5 L0,9 Z" fill="#5cc6ef" />
+                </marker>
+                <marker
+                  id="ah-violet"
+                  markerWidth="9"
+                  markerHeight="9"
+                  refX="7"
+                  refY="4.5"
+                  orient="auto"
+                >
+                  <path d="M0,0 L9,4.5 L0,9 Z" fill="#9b8cff" />
+                </marker>
+                <marker
+                  id="ah-orange"
+                  markerWidth="9"
+                  markerHeight="9"
+                  refX="7"
+                  refY="4.5"
+                  orient="auto"
+                >
+                  <path d="M0,0 L9,4.5 L0,9 Z" fill="#F29B5B" />
+                </marker>
+              </defs>
+            </svg>
+
+            <div
+              class="ext podcast"
+              id="nPodcast"
+              style="
+                position: absolute;
+                z-index: 3;
+                width: 230px;
+                bottom: 0;
+                left: 8px;
+              "
+            >
+              <div class="et">🎙️ Podcast-Feeds</div>
+              <div class="es">externe Quelle, RSS (z. B. Buzzsprout)</div>
+            </div>
+
+            <div class="server" id="server">
+              <div class="badge">🏛️ HdM-Server · alle Module und Daten</div>
+              <div class="pipe">
+                <div class="node" id="n0">
+                  <span class="src-chip" title="liest RSS-Feeds">RSS</span>
+                  <div class="ni">📥</div>
+                  <div class="nt">Ingestion</div>
+                  <div class="ns">Go</div>
+                </div>
+                <div class="node" id="n1">
+                  <div class="ni">🗄️</div>
+                  <div class="nt">MinIO</div>
+                  <div class="ns">Objektspeicher</div>
+                </div>
+                <div class="node" id="n2">
+                  <span
+                    class="spark-chip"
+                    title="nutzt den Spark-Server per HTTP"
+                    >⚡ HTTP</span
+                  >
+                  <div class="ni">⚙️</div>
+                  <div class="nt">Preprocessing</div>
+                  <div class="ns">Transkription, Kapitel</div>
+                </div>
+                <div class="node" id="n3">
+                  <span
+                    class="spark-chip"
+                    title="nutzt den Spark-Server per HTTP"
+                    >⚡ HTTP</span
+                  >
+                  <div class="ni">✨</div>
+                  <div class="nt">Silver Enriched</div>
+                  <div class="ns">Anreicherung</div>
+                </div>
+                <div class="node" id="n4">
+                  <div class="ni">🐘</div>
+                  <div class="nt">PostgreSQL</div>
+                  <div class="ns">Daten + Vektoren</div>
+                </div>
+                <div class="node" id="n5">
+                  <div class="ni">🔌</div>
+                  <div class="nt">Backend</div>
+                  <div class="ns">API</div>
+                </div>
+                <div class="node" id="n6">
+                  <div class="ni">🖥️</div>
+                  <div class="nt">Frontend</div>
+                  <div class="ns">Web-UI</div>
+                </div>
+              </div>
+              <div class="pipedetail">
+                <div class="pd">
+                  Go-Worker liest RSS-Feeds (gofeed), eigener Full/Delta-Lauf
+                </div>
+                <div class="pd">rohes Audio im Bucket <code>bronze</code></div>
+                <div class="pd">
+                  Whisper macht Text, danach Kapitel
+                  <span class="pdo">⚡ Spark</span>
+                </div>
+                <div class="pd">
+                  Summary, Fakten, Vektoren, Emotion
+                  <span class="pdo">⚡ Spark</span>
+                </div>
+                <div class="pd">Metadaten, Claims, Embeddings (pgvector)</div>
+                <div class="pd">REST-API, Vektorsuche, Presigned URLs</div>
+                <div class="pd">Suchen, Lesen, Audio streamen</div>
+              </div>
+            </div>
+
+            <div
+              class="ext spark"
+              id="nSpark"
+              style="
+                position: absolute;
+                z-index: 3;
+                width: 460px;
+                left: 50%;
+                transform: translateX(-50%);
+                bottom: 0;
+              "
+            >
+              <div class="et">
+                ⚡ Spark-Server
+                <span class="pill tag-orange" style="margin-left: 4px"
+                  >extern</span
+                >
+              </div>
+              <div class="es">
+                Whisper und wav2vec2, aufgerufen per <b>HTTP-Request</b>,
+                vernetzt über <b>Tailscale</b>
+              </div>
+            </div>
+          </div>
+
+          <div class="legend">
+            <span
+              ><svg width="34" height="10">
+                <line
+                  x1="0"
+                  y1="5"
+                  x2="30"
+                  y2="5"
+                  stroke="#5cc6ef"
+                  stroke-width="2.4"
+                  stroke-dasharray="6 5"
+                />
+              </svg>
+              Datenfluss</span
+            >
+            <span
+              ><svg width="34" height="10">
+                <line
+                  x1="0"
+                  y1="5"
+                  x2="30"
+                  y2="5"
+                  stroke="#9b8cff"
+                  stroke-width="2.4"
+                />
+              </svg>
+              Feed-Abruf</span
+            >
+            <span
+              ><svg width="34" height="10">
+                <line
+                  x1="0"
+                  y1="5"
+                  x2="30"
+                  y2="5"
+                  stroke="#F29B5B"
+                  stroke-width="2.4"
+                  stroke-dasharray="6 5"
+                />
+              </svg>
+              HTTP zum Spark-Server (Tailscale)</span
+            >
+          </div>
+        </div>
+      </section>
+
+      <!-- 2 DEPLOYMENT -->
+      <section class="slide">
+        <div class="titlebar">
+          <div class="kicker">
+            <span class="dot"></span><span>Deployment und Betrieb</span>
+          </div>
+          <h1 class="title">Ein Server für alles, Modelle ausgelagert</h1>
+          <p class="subtitle">
+            Wo läuft was? Der komplette Anwendungs-Stack zentral, die
+            GPU-lastigen Modelle bewusst separat.
+          </p>
+        </div>
+        <div class="body">
+          <div class="two">
+            <div class="card" style="border-color: rgba(92, 198, 239, 0.4)">
+              <h3>
+                <span class="ico">🏛️</span> HdM-Server
+                <span class="pill tag-teal">zentral</span>
+              </h3>
+              <ul class="clean mt8">
+                <li><b>Ingestion</b> (Go)</li>
+                <li>
+                  <b>Preprocessing</b>, Transkription und Kapitel-Erkennung
+                </li>
+                <li><b>Silver Enriched</b> (Processing), Anreicherung</li>
+                <li><b>Backend</b> (API) und <b>Frontend</b> (Web-UI)</li>
+                <li><b>PostgreSQL</b>, Datenbank inkl. Vektoren (pgvector)</li>
+                <li><b>MinIO</b>, Objektspeicher für Audio und Rohdaten</li>
+              </ul>
+            </div>
+            <div class="card" style="border-color: rgba(242, 155, 91, 0.45)">
+              <h3>
+                <span class="ico">⚡</span> Spark-Server
+                <span class="pill tag-orange">extern</span>
+              </h3>
+              <ul class="clean mt8">
+                <li><b>Whisper</b> → Transkription (Audio zu Text)</li>
+                <li><b>wav2vec2</b> → Emotionserkennung</li>
+                <li class="small" style="margin-top: 6px">
+                  Rechenintensive KI-Modelle (GPU)
+                </li>
+              </ul>
+              <div class="note mt18">
+                <b>Verbindung:</b> HdM-Server ruft Spark per
+                <b>HTTP-Request</b> auf (Audio-Schnipsel hin, Ergebnis zurück),
+                vernetzt über <b>Tailscale</b> (privates VPN).
+              </div>
+            </div>
+          </div>
+          <div
+            class="note mt18"
+            style="
+              background: var(--glass);
+              border-color: var(--line);
+              color: var(--muted);
+            "
+          >
+            💡 <b>Warum die Trennung?</b> Die Modelle bleiben ausgelagert, damit
+            der HdM-Server schlank bleibt und selbst keine GPU braucht. Die
+            Schnittstelle ist nur ein simpler HTTP-Aufruf, der Spark-Server
+            lässt sich austauschen oder aufrüsten, ohne den Rest des Systems
+            anzufassen.
+          </div>
+        </div>
+      </section>
+
+      <!-- 3 SILVER ENRICHED ARCHITEKTUR -->
+      <section class="slide">
+        <div class="titlebar">
+          <div class="kicker">
+            <span class="dot"></span><span>Silver Enriched · Architektur</span>
+          </div>
+          <h1 class="title">Anreicherung in drei Orchestrierungs-Ebenen</h1>
+          <p class="subtitle">
+            Aus „Silver"-Rohdaten (Transkripte, Kapitel) werden
+            „Enriched"-Inhalte. Vier Module, einzeln testbar oder gemeinsam über
+            einen Runner gesteuert.
+          </p>
+        </div>
+        <div class="body">
+          <div
+            class="two"
+            style="grid-template-columns: 0.92fr 1.08fr; gap: 26px"
+          >
+            <div>
+              <div class="layers">
+                <div class="layer">
+                  <div class="lh">① Runner <small>00_…_runner.py</small></div>
+                  <div class="lc">
+                    Einstiegspunkt eines Laufs. Liest CLI und Config, holt
+                    <b>einen</b> gemeinsamen Zeitstempel (<code
+                      >SELECT NOW()</code
+                    >), startet die Steps <b>parallel</b> und sammelt Fehler.
+                  </div>
+                  <div class="chev">▼</div>
+                </div>
+                <div class="layer">
+                  <div class="lh">
+                    ② Steps <small>01_…_04_pipeline_*.py</small>
+                  </div>
+                  <div class="lc">
+                    Pro Modul ein Step: Daten aus der DB holen (<b
+                      >Delta oder Full</b
+                    >), Modul aufrufen, Ergebnisse zurückschreiben, eigenen
+                    <code>pipeline_batches</code>-Eintrag verwalten.
+                  </div>
+                  <div class="chev">▼</div>
+                </div>
+                <div class="layer">
+                  <div class="lh">③ Core <small>*_core.py</small></div>
+                  <div class="lc">
+                    Reine Fachlogik (LLM-Aufruf, Embedding, Audio-Analyse).
+                    Kennt die DB nicht, bekommt Text oder Audio rein und liefert
+                    Ergebnisse zurück. So isoliert testbar.
+                  </div>
+                </div>
+              </div>
+              <div class="note mt18">
+                <b>Parallel:</b> Summarizer, Fact Checker und Emotion laufen
+                gleichzeitig. Der <b>Embedder</b> wartet auf die
+                Episoden-Summary des Summarizers. Jeder Step hat eigene
+                DB-Connection und Transaktion.
+              </div>
+            </div>
+
+            <div>
+              <div class="modgrid">
+                <div class="mod m1">
+                  <div class="mt">📝 Text Summarizer</div>
+                  <div class="io">
+                    <span class="k">in</span
+                    ><span class="v">chapters.transcript</span>
+                  </div>
+                  <div class="io">
+                    <span class="k">out</span
+                    ><span class="v">episodes/chapters.summary</span>
+                  </div>
+                  <div class="mio">
+                    LLM (Gemini oder Ollama), je Kapitel und je Episode
+                  </div>
+                </div>
+                <div class="mod m2">
+                  <div class="mt">🔍 Fact Checker</div>
+                  <div class="io">
+                    <span class="k">in</span
+                    ><span class="v">chapters.transcript</span>
+                  </div>
+                  <div class="io">
+                    <span class="k">out</span
+                    ><span class="v">fact_checked_claims</span>
+                  </div>
+                  <div class="mio">
+                    3 LLM-Rollen plus Web-Suche (DuckDuckGo), Verdict
+                  </div>
+                </div>
+                <div class="mod m3">
+                  <div class="mt">🧭 Embedder</div>
+                  <div class="io">
+                    <span class="k">in</span
+                    ><span class="v">title, summary, transcript</span>
+                  </div>
+                  <div class="io">
+                    <span class="k">out</span><span class="v">embeddings</span>
+                  </div>
+                  <div class="mio">
+                    Vektoren auf 3 Ebenen (Podcast, Episode, Kapitel)
+                  </div>
+                </div>
+                <div class="mod m4">
+                  <div class="mt">🎭 Emotion Analyser</div>
+                  <div class="io">
+                    <span class="k">in</span
+                    ><span class="v">Audio + Zeilen-Zeiten</span>
+                  </div>
+                  <div class="io">
+                    <span class="k">out</span
+                    ><span class="v">transcript_lines.emotion</span>
+                  </div>
+                  <div class="mio">wav2vec2 auf dem Spark-Server (HTTP)</div>
+                </div>
+              </div>
+              <div class="card mt14" style="padding: 14px 18px">
+                <p style="font-size: 13.5px">
+                  🔗 <b>Quelle der Steuerung:</b> Zwei Zeitstempel pro
+                  Datensatz,
+                  <code>preprocessing_updated_at</code> (Vorverarbeitung) gegen
+                  <code>processing_updated_at</code> (Anreicherung). Ihr
+                  Vergleich treibt den Delta-Load.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4 FULL vs DELTA -->
+      <section class="slide">
+        <div class="titlebar">
+          <div class="kicker">
+            <span class="dot"></span><span>Silver Enriched · Lade-Strategie</span>
+          </div>
+          <h1 class="title">Full Load gegen Delta Load</h1>
+          <p class="subtitle">
+            Wie entscheidet die Pipeline, was erneut verarbeitet werden muss?
+          </p>
+        </div>
+        <div class="body">
+          <div class="two">
+            <div class="card">
+              <h3>
+                <span
+                  class="pill"
+                  style="
+                    background: #11314c;
+                    color: #cfeaff;
+                    border-color: transparent;
+                  "
+                  >FULL LOAD</span
+                >
+              </h3>
+              <p class="mt8">
+                Alles wird neu verarbeitet, ohne zu prüfen, ob ein Datensatz
+                schon bearbeitet wurde.
+              </p>
+              <p class="mt8 small">
+                Sinnvoll für: <b>Erstbefüllung</b> oder bewusstes
+                <b>Reprocessing</b> nach Modell- oder Prompt-Wechsel.
+              </p>
+            </div>
+            <div class="card" style="border-color: rgba(92, 198, 239, 0.4)">
+              <h3><span class="pill tag-teal">DELTA LOAD · Standard</span></h3>
+              <p class="mt8">
+                Nur Datensätze, die seit dem letzten erfolgreichen Lauf
+                <b>neu oder geändert</b> sind.
+              </p>
+              <p class="mt8 small">
+                Spart teure LLM-, Such- und Audio-Aufrufe. Wiederholte Läufe
+                sind <b>günstig und sicher</b> (kein Datenverlust).
+              </p>
+            </div>
+          </div>
+          <div class="note mt18">
+            🌊 <b>Watermark („Wasserzeichen"):</b> der Zeitpunkt des letzten
+            erfolgreichen Laufs eines Moduls.<br />
+            Datensatz <b>neuer</b> als die Watermark? Dann verarbeiten.
+            <b>Älter oder gleich?</b> Dann überspringen.
+          </div>
+          <ul class="clean mt18">
+            <li>
+              Noch nie erfolgreich gelaufen, also Watermark leer? Dann verhält
+              sich Delta wie Full Load.
+            </li>
+            <li>
+              Lauf schlägt fehl? Dann rückt die Watermark <b>nicht</b> vor, der
+              nächste Versuch wiederholt denselben Bereich.
+            </li>
+            <li>Jedes der vier Module hat seine <b>eigene</b> Watermark.</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 5 WATERMARK -->
+      <section class="slide">
+        <div class="titlebar">
+          <div class="kicker">
+            <span class="dot"></span><span>Silver Enriched · Lade-Strategie · Watermark</span>
+          </div>
+          <h1 class="title">Watermark pro Modul</h1>
+          <p class="subtitle">
+            Jedes Modul filtert seine Quelle gegen den Start seines letzten
+            erfolgreichen Laufs. Ein Zeitstempel pro Modul, nicht pro Zeile.
+          </p>
+        </div>
+        <div class="body">
+          <div
+            class="two"
+            style="grid-template-columns: 0.82fr 1.18fr; gap: 24px"
+          >
+            <div>
+              <div class="codeblk">
+                <span class="cm">-- 1) Watermark holen</span>
+                <span class="kw">SELECT</span> MAX(start_ts)
+                <span class="kw">FROM</span> pipeline_batches
+                <span class="kw">WHERE</span> stage =
+                <span class="st">'&lt;modul&gt;'</span>
+                <span class="kw">AND</span> status =
+                <span class="st">'success'</span>;
+
+                <span class="cm">-- 2) Delta-Filter auf die Quelle</span>
+                <span class="kw">WHERE</span> preprocessing_updated_at &gt;
+                watermark
+              </div>
+              <div class="note mt14">
+                <b>watermark = NULL</b> (noch nie erfolgreich)? Dann kein
+                Filter, also wie Full Load.
+              </div>
+            </div>
+            <div>
+              <table class="wm">
+                <thead>
+                  <tr>
+                    <th>Modul (Step)</th>
+                    <th>Quelle · …_updated_at</th>
+                    <th>Watermark-Stage</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Text Summarizer</td>
+                    <td><code>chapters</code></td>
+                    <td><code>text_summarizer</code></td>
+                  </tr>
+                  <tr>
+                    <td>Fact Checker</td>
+                    <td><code>chapters</code></td>
+                    <td><code>fact_checker</code></td>
+                  </tr>
+                  <tr class="embed">
+                    <td>Embedder · Kapitel</td>
+                    <td><code>chapters</code></td>
+                    <td><code>embedder</code></td>
+                  </tr>
+                  <tr class="embed">
+                    <td>Embedder · Episode</td>
+                    <td><code>episodes</code></td>
+                    <td><code>embedder</code></td>
+                  </tr>
+                  <tr class="embed">
+                    <td>Embedder · Podcast</td>
+                    <td><code>podcasts</code></td>
+                    <td><code>embedder</code></td>
+                  </tr>
+                  <tr>
+                    <td>Emotion Analyser</td>
+                    <td><code>transcript_lines</code></td>
+                    <td><code>emotion_scoring</code></td>
+                  </tr>
+                </tbody>
+              </table>
+              <p class="small mt8" style="color: var(--green)">
+                ↑ Die drei Embedder-Ebenen teilen sich <b>eine</b> Watermark
+                (Stage <code>embedder</code>).
+              </p>
+            </div>
+          </div>
+          <div class="three mt18">
+            <div class="card" style="padding: 14px 17px">
+              <p>
+                <b>start_ts statt fin_ts:</b> ein Datensatz, der
+                <i>während</i> des Laufs neu vorverarbeitet wird, geht nicht
+                verloren, er kommt beim nächsten Lauf dran (idempotent).
+              </p>
+            </div>
+            <div class="card" style="padding: 14px 17px">
+              <p>
+                <b>Nur status='success' zählt.</b> Fehlgeschlagene, Dry-Run- und
+                Läufe mit fester <code>--batch-id</code> rücken die Watermark
+                nicht vor.
+              </p>
+            </div>
+            <div class="card" style="padding: 14px 17px">
+              <p>
+                <b>Robust gegen leere Ergebnisse:</b> ein Kapitel ohne Claims
+                gilt trotzdem als erledigt, die Watermark hängt nicht an
+                geschriebenen Zielzeilen.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6 POLL -->
+      <section class="slide">
+        <div class="titlebar">
+          <div class="kicker">
+            <span class="dot"></span><span>Silver Enriched · Lade-Strategie · Trigger</span>
+          </div>
+          <h1 class="title">Wann wird ein Lauf ausgelöst? (Poll-Modus)</h1>
+          <p class="subtitle">
+            Der Runner kann sich selbst anstoßen, sobald neue vorverarbeitete
+            Daten vorliegen.
+          </p>
+        </div>
+        <div class="body">
+          <div class="loop">
+            <div class="loopflow">
+              <div class="lp start">Start <code>--poll</code></div>
+              <div class="a">▼</div>
+              <div class="lp q">Neue vorverarbeitete Daten vorhanden?</div>
+              <div class="a">▼ ja</div>
+              <div class="lp run">
+                run_pipeline<small>ein voller Durchlauf</small>
+              </div>
+              <div class="a">▼</div>
+              <div class="lp wait">
+                warten · poll_interval
+                <small>Default 60 s, danach ↻ nächster Tick</small>
+              </div>
+            </div>
+            <div>
+              <div class="card" style="border-color: rgba(92, 198, 239, 0.35)">
+                <h3>
+                  🎯 Trigger-Bedingung
+                  <span class="small">has_new_preprocessed_data</span>
+                </h3>
+                <div class="cmp">
+                  <div class="side">
+                    <b>Preprocessing</b
+                    ><code style="font-size: 11px">MAX(start_ts)</code
+                    ><br />stage = segmenting<br />status ∈ {success, consumed}
+                  </div>
+                  <div class="gt">&gt;</div>
+                  <div class="side">
+                    <b>Processing</b
+                    ><code style="font-size: 11px">MAX(start_ts)</code><br />4
+                    Module<br />status = success
+                  </div>
+                </div>
+                <p class="small" style="text-align: center">
+                  Lauf fällig, wenn Preprocessing <b>neuer</b> ist (oder
+                  Processing nie erfolgreich lief).
+                </p>
+              </div>
+              <ul class="clean mt14">
+                <li>
+                  <b>Standard</b> ohne <code>--poll</code>: genau ein Durchlauf,
+                  dann Ende.
+                </li>
+                <li>
+                  <b>DB-Polling statt Broker:</b> nur ein Schlaf-Intervall plus
+                  eine SQL-Abfrage pro Tick.
+                </li>
+                <li>
+                  Nur <code>segmenting</code> geprüft, das beweist, dass die
+                  Transkription dahinter fertig ist.
+                </li>
+                <li>
+                  <b>Graceful Shutdown:</b> SIGINT oder SIGTERM beenden nach dem
+                  laufenden Durchlauf, kein Abbruch mitten im Write.
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 7 RUNNER -->
+      <section class="slide">
+        <div class="titlebar">
+          <div class="kicker">
+            <span class="dot"></span><span>Silver Enriched · Orchestrierung</span>
+          </div>
+          <h1 class="title">Processing Pipeline Runner</h1>
+          <p class="subtitle">
+            Ein Einstiegspunkt steuert alle vier Module: parallel, mit
+            Abhängigkeit, robust.
+          </p>
+        </div>
+        <div class="body">
+          <div class="two" style="grid-template-columns: 1.15fr 0.85fr">
+            <div class="card">
+              <h3>⚙️ Parallele Ausführung</h3>
+              <div class="par3 mt8">
+                <div class="pcard">📝 Text Summarizer</div>
+                <div class="pcard">🔍 Fact Checker</div>
+                <div class="pcard">🎭 Emotion Analyser</div>
+              </div>
+              <p
+                class="small mt8"
+                style="text-align: center; color: var(--teal2)"
+              >
+                ↑ laufen gleichzeitig (disjunkte Quell- und Zieltabellen)
+              </p>
+              <div class="arrow-d">▼</div>
+              <div class="embcard">
+                <div class="eico">🧭</div>
+                <div class="etx">
+                  <b>Embedder</b
+                  ><span
+                    >startet erst, wenn der Text Summarizer fertig ist (er
+                    braucht die Episoden-Summary)</span
+                  >
+                </div>
+              </div>
+            </div>
+            <div>
+              <ul class="clean">
+                <li>
+                  <b>Ein Zeitstempel</b> pro Lauf (<code>SELECT NOW()</code>),
+                  alle Schreibvorgänge tragen denselben
+                  <code>processing_updated_at</code>.
+                </li>
+                <li>
+                  <b>Eigene DB-Connection</b> und Transaktion je Step (psycopg
+                  ist nicht thread-safe).
+                </li>
+                <li>
+                  <b>Kein silent fail:</b> ein Step rollt seine Transaktion
+                  zurück, der Runner sammelt alle Fehler und wirft den ersten
+                  erneut.
+                </li>
+                <li>
+                  <b><code>--max-workers</code></b> begrenzt die Parallelität,
+                  etwa bei Speicherengpässen mit lokalem Ollama.
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 8 TEXT SUMMARIZER -->
+      <section class="slide">
+        <div class="titlebar">
+          <div class="kicker">
+            <span class="dot"></span><span>Silver Enriched · Modul 1 von 4</span>
+          </div>
+          <h1 class="title">📝 Text Summarizer</h1>
+          <p class="subtitle">
+            Automatisierte Zusammenfassungen je Kapitel und je Episode.
+          </p>
+        </div>
+        <div class="body">
+          <div class="two" style="grid-template-columns: 1fr 1fr">
+            <ul class="clean">
+              <li><b>Input:</b> Transkript-Text eines Kapitels</li>
+              <li><b>Output:</b> Zusammenfassung je Kapitel und je Episode</li>
+              <li><b>Modell:</b> LLM (Gemini oder lokal über Ollama)</li>
+              <li>
+                <b>Deterministisch</b> (Temperatur 0), gleicher Text ergibt
+                gleiche Summary
+              </li>
+              <li>
+                Episoden-Summary wird aus den
+                <b>Kapitel-Summaries</b> aggregiert, nicht aus dem Rohtranskript
+              </li>
+            </ul>
+            <div class="flow-v">
+              <div class="step">
+                <span class="num">1</span> Kapitel-Transkripte
+              </div>
+              <div class="arrow-d">▼</div>
+              <div class="step accent">
+                <span class="num">L</span> LLM, je Kapitel
+              </div>
+              <div class="arrow-d">▼</div>
+              <div class="step">
+                <span class="num">2</span> Kapitel-Zusammenfassung
+              </div>
+              <div class="arrow-d">▼</div>
+              <div class="step accent">
+                <span class="num">L</span> LLM, je Episode
+              </div>
+              <div class="arrow-d">▼</div>
+              <div class="step">
+                <span class="num">3</span> Episoden-Zusammenfassung plus
+                Highlights
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 9 FACT CHECKER -->
+      <section class="slide">
+        <div class="titlebar">
+          <div class="kicker">
+            <span class="dot"></span><span>Silver Enriched · Modul 2 von 4</span>
+          </div>
+          <h1 class="title">🔍 Fact Checker</h1>
+          <p class="subtitle">
+            Behauptungen erkennen, im Web recherchieren und bewerten, nur anhand
+            der Quellen.
+          </p>
+        </div>
+        <div class="body">
+          <div class="two" style="grid-template-columns: 1fr 1fr">
+            <ul class="clean">
+              <li><b>Input:</b> Transkript-Text eines Kapitels</li>
+              <li>
+                <b>Output:</b> jede Behauptung mit
+                <b>Urteil, Begründung und Quellen</b>
+              </li>
+              <li>
+                <b>3 LLM-Rollen:</b> finden, dann Suchanfragen, dann bewerten
+              </li>
+              <li><b>Web-Suche</b> über DuckDuckGo</li>
+              <li>
+                Urteile: <span class="pill tag-green">wahr</span>
+                <span class="pill tag-green">größtenteils wahr</span>
+                <span class="pill tag-orange">irreführend</span>
+                <span
+                  class="pill"
+                  style="color: #ffc0c0; border-color: rgba(255, 120, 120, 0.4)"
+                  >falsch</span
+                >
+                <span class="pill">nicht überprüfbar</span>
+              </li>
+            </ul>
+            <div class="flow-v">
+              <div class="step">
+                <span class="num">1</span> Kapitel-Transkript
+              </div>
+              <div class="arrow-d">▼</div>
+              <div class="step accent">
+                <span class="num">L</span> Behauptungen finden
+              </div>
+              <div class="arrow-d">▼</div>
+              <div class="step accent">
+                <span class="num">L</span> Suchanfragen formulieren
+              </div>
+              <div class="arrow-d">▼</div>
+              <div class="step orange">
+                <span class="num">🌐</span> Web-Suche
+              </div>
+              <div class="arrow-d">▼</div>
+              <div class="step accent">
+                <span class="num">L</span> Bewerten, nur anhand der Quellen
+              </div>
+              <div class="arrow-d">▼</div>
+              <div class="step">
+                <span class="num">✓</span> Urteil plus Quellen
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 10 EMBEDDER -->
+      <section class="slide">
+        <div class="titlebar">
+          <div class="kicker">
+            <span class="dot"></span><span>Silver Enriched · Modul 3 von 4</span>
+          </div>
+          <h1 class="title">🧭 Embedder</h1>
+          <p class="subtitle">
+            Vektor-Repräsentationen für die semantische Suche, also „finde
+            inhaltlich Passendes".
+          </p>
+        </div>
+        <div class="body">
+          <div class="two" style="grid-template-columns: 1fr 1fr">
+            <ul class="clean">
+              <li>
+                Erzeugt <b>Vektoren</b>, die die Bedeutung eines Textes abbilden
+              </li>
+              <li>
+                Grundlage der <b>semantischen Suche</b> (statt exakter
+                Stichwörter)
+              </li>
+              <li>
+                <b>Reines Embedding-Modell</b> (kein Chat), Ollama oder Gemini
+              </li>
+              <li>
+                Speicherung in PostgreSQL via
+                <b>pgvector</b> (<code>halfvec</code>)
+              </li>
+              <li>
+                Vektor-Länge wird geprüft, ein Mismatch bricht den Lauf ab
+              </li>
+            </ul>
+            <div>
+              <div class="step" style="margin-bottom: 8px">
+                <span class="num">P</span> Podcast →
+                <code style="margin-left: 6px">podcasts.title</code>
+              </div>
+              <div class="step" style="margin-bottom: 8px">
+                <span class="num">E</span> Episode →
+                <code style="margin-left: 6px">episodes.summary</code>
+              </div>
+              <div class="step" style="margin-bottom: 8px">
+                <span class="num">K</span> Kapitel →
+                <code style="margin-left: 6px">chapters.transcript</code>
+              </div>
+              <div class="arrow-d">▼</div>
+              <div class="step accent" style="justify-content: center">
+                🧭 Embedding-Modell
+              </div>
+              <div class="arrow-d">▼</div>
+              <div class="step" style="justify-content: center">
+                🐘 <code style="margin-left: 6px">embeddings</code> (3 Ebenen)
+              </div>
+              <p class="small mt8">
+                Die Episoden-Ebene setzt eine vorhandene <b>Summary</b> voraus,
+                daher die Abhängigkeit vom Text Summarizer.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 11 EMOTION -->
+      <section class="slide">
+        <div class="titlebar">
+          <div class="kicker">
+            <span class="dot"></span><span>Silver Enriched · Modul 4 von 4</span>
+          </div>
+          <h1 class="title">🎭 Emotion Analyser</h1>
+          <p class="subtitle">
+            Emotionserkennung je Transkript-Zeile aus dem Audio, auf dem
+            Spark-Server.
+          </p>
+        </div>
+        <div class="body">
+          <div class="two" style="grid-template-columns: 1fr 1fr">
+            <ul class="clean">
+              <li>
+                <b>Input:</b> Episoden-Audio (MinIO) plus Start- und Endzeit je
+                Zeile
+              </li>
+              <li>
+                <b>Output:</b> <code>emotion</code> plus
+                <code>emotion_score</code> je Zeile
+              </li>
+              <li>
+                Kein LLM, sondern Audio-Klassifikation mit <b>wav2vec2</b>
+              </li>
+              <li>Läuft auf dem externen <b>Spark-Server</b> (HTTP)</li>
+              <li>Labels: neutral, fröhlich, wütend, traurig</li>
+            </ul>
+            <div class="flow-v">
+              <div class="step">
+                <span class="num">1</span> Transkript-Zeilen je Episode
+              </div>
+              <div class="arrow-d">▼</div>
+              <div class="step">
+                <span class="num">2</span> <b>Ganze Episode</b> laden oder aus
+                Cache
+              </div>
+              <div class="arrow-d">▼</div>
+              <div class="step">
+                <span class="num">3</span> Zeilen-Segment schneiden (ffmpeg)
+              </div>
+              <div class="arrow-d">▼</div>
+              <div class="step orange">
+                <span class="num">⚡</span> wav2vec2 auf dem Spark-Server (HTTP)
+              </div>
+              <div class="arrow-d">▼</div>
+              <div class="step">
+                <span class="num">4</span> Emotion plus Konfidenz speichern
+              </div>
+            </div>
+          </div>
+          <div class="note mt18">
+            🗃️ <b>Caching:</b> Die <b>ganze Episoden-Audiodatei</b> wird einmal
+            geladen und für alle ihre Zeilen wiederverwendet. Die kurzen
+            <b>Zeilen-Segmente</b> sind Wegwerf-Dateien (Temp-Ordner, nach dem
+            Lauf gelöscht).
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="hint">
+      Navigation: <span class="kbd">←</span> <span class="kbd">→</span> ·
+      <span class="kbd">F</span> Vollbild
+    </div>
+    <div class="nav">
+      <button class="btn" id="prev">‹</button>
+      <button class="btn" id="next">›</button>
+      <span class="count" id="count">1 / 12</span>
+      <div class="dots" id="dots"></div>
+      <span class="label">media-lens · Architektur</span>
+    </div>
+
+    <script>
+      const slides = [...document.querySelectorAll(".slide")];
+      const dotsWrap = document.getElementById("dots");
+      const count = document.getElementById("count");
+      const prog = document.getElementById("prog");
+      let i = 0;
+
+      slides.forEach((_, idx) => {
+        const d = document.createElement("i");
+        d.addEventListener("click", () => go(idx));
+        dotsWrap.appendChild(d);
+      });
+      const dots = [...dotsWrap.children];
+
+      function go(n) {
+        i = Math.max(0, Math.min(slides.length - 1, n));
+        slides.forEach((s, idx) => {
+          s.classList.toggle("active", idx === i);
+          s.classList.toggle("prev", idx < i);
+        });
+        dots.forEach((d, idx) => d.classList.toggle("on", idx === i));
+        count.textContent = i + 1 + " / " + slides.length;
+        prog.style.width = (i / (slides.length - 1)) * 100 + "%";
+        if (i === 1) requestAnimationFrame(layoutArch);
+      }
+      document
+        .getElementById("next")
+        .addEventListener("click", () => go(i + 1));
+      document
+        .getElementById("prev")
+        .addEventListener("click", () => go(i - 1));
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") {
+          go(i + 1);
+          e.preventDefault();
+        } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
+          go(i - 1);
+          e.preventDefault();
+        } else if (e.key === "Home") go(0);
+        else if (e.key === "End") go(slides.length - 1);
+        else if (e.key.toLowerCase() === "f") {
+          if (!document.fullscreenElement)
+            document.documentElement.requestFullscreen();
+          else document.exitFullscreen();
+        }
+      });
+
+      /* Architecture wiring */
+      const arch = document.getElementById("arch");
+      const wires = document.getElementById("wires");
+      const NS = "http://www.w3.org/2000/svg";
+      function rc(el) {
+        const a = arch.getBoundingClientRect();
+        const r = el.getBoundingClientRect();
+        return {
+          l: r.left - a.left,
+          t: r.top - a.top,
+          r: r.right - a.left,
+          b: r.bottom - a.top,
+          cx: r.left - a.left + r.width / 2,
+          cy: r.top - a.top + r.height / 2,
+        };
+      }
+      function line(x1, y1, x2, y2, opts = {}) {
+        const p = document.createElementNS(NS, "path");
+        let d;
+        if (opts.curve) {
+          const my = (y1 + y2) / 2;
+          d = `M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`;
+        } else {
+          d = `M ${x1} ${y1} L ${x2} ${y2}`;
+        }
+        p.setAttribute("d", d);
+        p.setAttribute("fill", "none");
+        p.setAttribute("stroke", opts.stroke || "#5cc6ef");
+        p.setAttribute("stroke-width", opts.w || 2.4);
+        if (opts.dash) {
+          p.setAttribute("class", "flowdash");
+          p.setAttribute("stroke-dasharray", "7 9");
+        }
+        if (opts.marker) p.setAttribute("marker-end", `url(#${opts.marker})`);
+        wires.appendChild(p);
+      }
+      function layoutArch() {
+        [...wires.querySelectorAll("path")].forEach((p) => p.remove());
+        const r = [];
+        for (let k = 0; k < 7; k++)
+          r.push(rc(document.getElementById("n" + k)));
+        // pipeline flow (between node columns, at node vertical center)
+        for (let k = 0; k < 6; k++) {
+          line(r[k].r, r[k].cy, r[k + 1].l - 2, r[k + 1].cy, {
+            stroke: "#5cc6ef",
+            marker: "ah-teal",
+            dash: true,
+            w: 2.4,
+          });
+        }
+        // podcast (unten links) -> server bottom edge, ausgerichtet unter Ingestion (n0)
+        const pod = rc(document.getElementById("nPodcast"));
+        const srvP = rc(document.getElementById("server"));
+        line(r[0].cx, pod.t, r[0].cx, srvP.b + 2, {
+          stroke: "#9b8cff",
+          marker: "ah-violet",
+          dash: false,
+          w: 2.4,
+        });
+        // spark -> server bottom, aligned under Preprocessing (n2) and Silver (n3)
+        const sp = rc(document.getElementById("nSpark"));
+        const srv = rc(document.getElementById("server"));
+        line(r[2].cx, sp.t, r[2].cx, srv.b + 2, {
+          stroke: "#F29B5B",
+          marker: "ah-orange",
+          dash: true,
+          w: 2.2,
+        });
+        line(r[3].cx, sp.t, r[3].cx, srv.b + 2, {
+          stroke: "#F29B5B",
+          marker: "ah-orange",
+          dash: true,
+          w: 2.2,
+        });
+      }
+      window.addEventListener("resize", () => {
+        if (i === 1) layoutArch();
+      });
+      window.addEventListener("load", () => {
+        go(0);
+        requestAnimationFrame(layoutArch);
+      });
+      go(0);
+    </script>
+  </body>
+</html>
