@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -16,7 +15,6 @@ import (
 	"github.com/tilmanzzz/media-lens/internal/go/db"
 )
 
-// worker groups shared external clients
 type worker struct {
 	store      *db.Store
 	bronze     *blob.Bucket
@@ -24,17 +22,9 @@ type worker struct {
 	feedParser *gofeed.Parser
 }
 
-// helpers
-
-func stripHTMLTags(input string) string {
-	re := regexp.MustCompile(`<[^>]*>`)
-	return re.ReplaceAllString(input, "")
-}
-
 func main() {
 	ctx := context.Background()
 
-	// init infrastructure
 	w := setupWorker(ctx)
 	defer w.store.Close()
 
@@ -49,16 +39,6 @@ func main() {
 	}
 	fmt.Printf("started pipeline batch [%s] mode: %s\n", batchID, loadMode)
 
-	// mock trigger for legacy updates
-	// TODO: FIX
-	if loadMode == "delta" {
-		if all, err := w.store.GetPodcastsForIngestion(ctx, "full"); err == nil {
-			for _, p := range all {
-				_ = w.store.SetPodcastSourceUpdatedAt(ctx, p.ID)
-			}
-		}
-	}
-
 	podcasts, err := w.store.GetPodcastsForIngestion(ctx, loadMode)
 	if err != nil {
 		log.Fatalf("failed to fetch target podcasts: %v", err)
@@ -66,9 +46,8 @@ func main() {
 
 	var allEpisodes []db.Episode
 
-	// process all feeds sequentially
 	for _, p := range podcasts {
-		fmt.Printf("processing feed: %s\n", p.FeedURL)
+		fmt.Printf("processing feed episodes: %s\n", p.FeedURL)
 
 		eps, err := w.processPodcast(ctx, p, loadMode, batchID)
 		if err != nil {
@@ -78,7 +57,6 @@ func main() {
 		allEpisodes = append(allEpisodes, eps...)
 	}
 
-	// bulk flush results
 	if len(allEpisodes) > 0 {
 		fmt.Printf("flushing global batch: writing %d episodes...\n", len(allEpisodes))
 		if err := w.flushEpisodes(ctx, allEpisodes); err != nil {
@@ -122,29 +100,10 @@ func (w *worker) processPodcast(ctx context.Context, p db.Podcast, loadMode, bat
 		return nil, fmt.Errorf("feed parse error: %w", err)
 	}
 
-	// determine canonical guid (prefer itunes author override)
-	guid := feed.Link
-	if itunes := feed.Extensions["itunes"]; itunes != nil && len(itunes["author"]) > 0 {
-		guid = itunes["author"][0].Value + feed.Title
+	if err := w.store.MarkPodcastIngested(ctx, p.ID, batchID); err != nil {
+		return nil, fmt.Errorf("failed to link batch to podcast record: %w", err)
 	}
 
-	hosts := extractHosts(feed)
-	sourceUpdated := feed.UpdatedParsed
-	if sourceUpdated == nil {
-		sourceUpdated = feed.PublishedParsed
-	}
-	if sourceUpdated == nil {
-		now := time.Now().Truncate(time.Second)
-		sourceUpdated = &now
-	}
-	rawDescription := feed.Description
-	cleanDescription := stripHTMLTags(rawDescription)
-
-	if err := w.store.UpdatePodcastMetadata(ctx, p.ID, guid, feed.Title, cleanDescription, hosts, sourceUpdated, batchID); err != nil {
-		return nil, fmt.Errorf("metadata update failed: %w", err)
-	}
-
-	// pull existing state for delta checks
 	existingEps, err := w.store.GetEpisodeMap(ctx, p.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed fetching state map: %w", err)
@@ -177,13 +136,11 @@ func (w *worker) processEpisode(
 	existingEps map[string]db.Episode,
 	loadMode, batchID string,
 ) (*db.Episode, error) {
-	// ignore items without an actual audio file
 	if len(item.Enclosures) == 0 {
 		return nil, nil
 	}
 	enclosureURL := item.Enclosures[0].URL
 
-	// check if we need to process this episode based on delta rules
 	existingEp, exists := existingEps[item.GUID]
 	isChanged := loadMode == "full" || !exists
 
@@ -200,18 +157,15 @@ func (w *worker) processEpisode(
 		return nil, nil
 	}
 
-	// clean up stale processing locks
 	if exists && existingEp.BatchID != "" {
 		_ = w.store.StopPreviousBatchIfNeeded(ctx, existingEp.BatchID)
 	}
 
-	// upload audio (required)
 	audioKey, err := w.uploadMedia(ctx, p.ID, item.GUID, "audio", "original", enclosureURL, "audio/mpeg, audio/*;q=0.9, */*;q=0.8")
 	if err != nil {
 		return nil, fmt.Errorf("audio upload failed: %w", err)
 	}
 
-	// find and upload cover image (optional)
 	imageURL := extractImageURL(item)
 	var coverKey string
 	if imageURL != "" {
@@ -241,7 +195,6 @@ func (w *worker) processEpisode(
 	}, nil
 }
 
-// uploadMedia handles the actual fetching and minio streaming
 func (w *worker) uploadMedia(
 	ctx context.Context,
 	podcastID, episodeGUID, assetType, filename, url, acceptHeader string,
@@ -251,7 +204,6 @@ func (w *worker) uploadMedia(
 		return "", err
 	}
 
-	// mimic a real browser to bypass basic cdn blocks
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 	req.Header.Set("Accept", acceptHeader)
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
@@ -284,21 +236,18 @@ func (w *worker) flushEpisodes(ctx context.Context, eps []db.Episode) error {
 	return err
 }
 
-// extractImageURL checks standard elements and itunes extensions
 func extractImageURL(item *gofeed.Item) string {
 	if item.Image != nil {
 		return item.Image.URL
 	}
 	if itunes, ok := item.Extensions["itunes"]; ok {
 		if img, ok := itunes["image"]; ok && len(img) > 0 {
-			// Use Attrs instead of Attributes
 			return img[0].Attrs["href"]
 		}
 	}
 	return ""
 }
 
-// converts iTunes/RSS duration to secondes
 func parseDuration(val string) *int {
 	if val == "" {
 		return nil
@@ -322,22 +271,4 @@ func parseDuration(val string) *int {
 		return nil
 	}
 	return &total
-}
-
-func extractHosts(feed *gofeed.Feed) string {
-	var hosts []string
-	if len(feed.Authors) > 0 {
-		for _, a := range feed.Authors {
-			if a.Name != "" {
-				hosts = append(hosts, a.Name)
-			}
-		}
-	} else if itunes := feed.Extensions["itunes"]; itunes != nil && len(itunes["author"]) > 0 {
-		for _, a := range itunes["author"] {
-			if a.Value != "" {
-				hosts = append(hosts, a.Value)
-			}
-		}
-	}
-	return strings.Join(hosts, ", ")
 }

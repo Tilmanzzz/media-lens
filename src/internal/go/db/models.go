@@ -10,9 +10,8 @@ type Podcast struct {
 	GUID                  string       `db:"guid"`
 	FeedURL               string       `db:"feed_url"`
 	Title                 string       `db:"title"`
-	IngestedAt            time.Time    `db:"ingested_at"`
 	MaxEpisodes           *int         `db:"max_episodes"`
-	SourceSystemUpdatedAt sql.NullTime `db:"source_system_updated_at"`
+	SourceSystemUpdatedAt sql.NullTime `db:"source_system_updated_at`
 }
 
 type Episode struct {

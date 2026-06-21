@@ -94,40 +94,6 @@ func (s *Store) SetTranscriptKey(ctx context.Context, id string, transcriptKey s
 	return nil
 }
 
-func (s *Store) UpsertEpisode(ctx context.Context, ep Episode) (string, error) {
-	query := `INSERT INTO episodes (podcast_id, guid, title, audio_key, cover_key, published_at, enclosure_url, batch_id) 
-	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
-	          ON CONFLICT (podcast_id, guid) DO UPDATE SET 
-	          	title = EXCLUDED.title,
-	          	audio_key = EXCLUDED.audio_key,
-	          	cover_key = EXCLUDED.cover_key,
-	          	published_at = EXCLUDED.published_at,
-	          	enclosure_url = EXCLUDED.enclosure_url,
-	          	batch_id = EXCLUDED.batch_id,
-	          	ingested_at = NOW(),
-	          	ingestion_updated_at = NOW()
-		RETURNING id`
-
-	var id string
-	err := s.Pool.QueryRow(
-		ctx,
-		query,
-		ep.PodcastID,
-		ep.GUID,
-		ep.Title,
-		ep.AudioKey,
-		ep.CoverKey,
-		ep.PublishedAt,
-		ep.EnclosureURL,
-		ep.BatchID,
-	).Scan(&id)
-	if err != nil {
-		return "", fmt.Errorf("upsert failed: %w", err)
-	}
-
-	return id, nil
-}
-
 // executes a single batch operation to insert/update multiple episodes.
 func (s *Store) BulkUpsertEpisodes(ctx context.Context, eps []Episode) ([]string, error) {
 	if len(eps) == 0 {

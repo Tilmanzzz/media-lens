@@ -27,6 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --chown=appuser:appuser --from=builder /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 COPY internal/python/ /app/internal/python/
+COPY 02_processing/common/ /app/common/
 COPY 02_processing/transcription/main.py /app/main.py
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1

@@ -99,6 +99,9 @@ services:
       - MINIO_PASS=${MINIO_PASS}
       - POSTGRES_URL=${POSTGRES_URL}
       - USE_CUDA=true
+      - LOG_DIR=${LOG_DIR}
+    volumes:
+      - ./logs/transcription:/app/logs
     deploy:
       resources:
         reservations:
@@ -123,6 +126,9 @@ services:
       - MINIO_USER=${MINIO_USER}
       - MINIO_PASS=${MINIO_PASS}
       - POSTGRES_URL=${POSTGRES_URL}
+      - LOG_DIR=${LOG_DIR}
+    volumes:
+      - ./logs/sectioning:/app/logs
     deploy:
       resources:
         reservations:
@@ -131,21 +137,7 @@ services:
               count: all
               capabilities: [gpu]
 
-  processing_silver:
-    build: ./src/02_processing/silver/
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-    env_file:
-      - .env
-    environment:
-      - MINIO_USER=${MINIO_USER}
-      - MINIO_PASS=${MINIO_PASS}
-      - S3_ENDPOINT=http://minio:9000
-      - POSTGRES_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASS}@postgres:5432/${POSTGRES_DB}
-
+ 
   backend:
     build: ./src/backend
     ports:

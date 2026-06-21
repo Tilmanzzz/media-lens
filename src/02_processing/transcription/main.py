@@ -3,7 +3,6 @@ import io
 import sys
 import json
 import asyncio
-import logging
 import signal
 import tempfile
 import asyncpg
@@ -14,11 +13,14 @@ from minio import Minio
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
 from internal.python.db.store import Store
+from common.app_logger import AppLogger
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+logger_instance = AppLogger(
+    module_name="transcription_worker",
+    enabled=True,
+    level=os.getenv("LOG_LEVEL", "INFO"),
 )
-logger = logging.getLogger("transcription_worker")
+logger = logger_instance.build()
 
 shutdown_event = asyncio.Event()
 internal_task_queue = asyncio.Queue()

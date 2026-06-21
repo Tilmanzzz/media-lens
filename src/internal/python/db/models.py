@@ -69,9 +69,6 @@ class Podcast(BaseModel):
     published_at: Optional[datetime] = None
     batch_id: Optional[uuid.UUID] = None
     source_system_updated_at: Optional[datetime] = None
-    processing_updated_at: Optional[datetime] = None
-    preprocessing_updated_at: Optional[datetime] = None
-    ingestion_updated_at: datetime
     max_episodes: Optional[int] = None
 
 

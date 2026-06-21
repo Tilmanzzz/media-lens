@@ -2,7 +2,6 @@ import os
 import sys
 import json
 import asyncio
-import logging
 import signal
 import nltk
 from typing import Any, Dict, List
@@ -16,11 +15,15 @@ from google.genai import types
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
 from internal.python.db.store import Store
+from common.app_logger import AppLogger
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+logger_instance = AppLogger(
+    module_name="sectioning_worker",  # use "transcription_worker" for the other file
+    enabled=True,
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    log_dir=os.getenv("LOG_DIR", "/app/logs"),
 )
-logger = logging.getLogger("sectioning_worker")
+logger = logger_instance.build()
 
 shutdown_event = asyncio.Event()
 internal_task_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -260,7 +263,6 @@ async def process_episode(
                 total_lines += len(chapter_sentences)
 
     await store.set_preprocessing_updated_at(episode_id)
-    await store.set_podcast_preprocessing_updated_at(podcast_id)
 
     logger.info(
         f"Episode {episode_id} (Podcast {podcast_id}): {len(chapters_metadata)} chapters generated ({total_lines} lines)."
