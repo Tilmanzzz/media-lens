@@ -1823,40 +1823,83 @@
           </p>
         </div>
         <div class="body">
-          <div class="two" style="grid-template-columns: 1fr 1fr">
+          <div class="two" style="grid-template-columns: 0.92fr 1.08fr">
             <ul class="clean">
-              <li><b>Input:</b> Transkript-Text eines Kapitels</li>
-              <li><b>Output:</b> Zusammenfassung je Kapitel und je Episode</li>
+              <li>
+                <b>Input:</b> Kapitel-Transkripte (eine Zeile je Kapitel der
+                Episoden im Lauf)
+              </li>
               <li><b>Modell:</b> LLM (Gemini oder lokal über Ollama)</li>
               <li>
-                <b>Deterministisch</b> (Temperatur 0), gleicher Text ergibt
-                gleiche Summary
+                <b>Zwei unabhängige Pfade</b> aus demselben Rohtranskript, kein
+                Pfad baut auf dem anderen auf
               </li>
               <li>
-                Episoden-Summary wird aus den
-                <b>Kapitel-Summaries</b> aggregiert, nicht aus dem Rohtranskript
+                Die <b>Episoden-Summary</b> entsteht aus dem kompletten,
+                zusammengesetzten Episoden-Transkript (alle Kapitel verkettet),
+                <b>nicht</b> aus den Kapitel-Summaries
+              </li>
+              <li>
+                <b>Deterministisch</b> (Temperatur 0) und zwei getrennte
+                Schreibvorgänge (<code>chapters.summary</code>,
+                <code>episodes.summary</code>)
               </li>
             </ul>
-            <div class="flow-v">
-              <div class="step">
-                <span class="num">1</span> Kapitel-Transkripte
+            <div>
+              <div
+                class="step"
+                style="justify-content: center; text-align: center"
+              >
+                📄 Kapitel-Transkripte (alle Kapitel einer Episode)
               </div>
-              <div class="arrow-d">▼</div>
-              <div class="step accent">
-                <span class="num">L</span> LLM, je Kapitel
-              </div>
-              <div class="arrow-d">▼</div>
-              <div class="step">
-                <span class="num">2</span> Kapitel-Zusammenfassung
-              </div>
-              <div class="arrow-d">▼</div>
-              <div class="step accent">
-                <span class="num">L</span> LLM, je Episode
-              </div>
-              <div class="arrow-d">▼</div>
-              <div class="step">
-                <span class="num">3</span> Episoden-Zusammenfassung plus
-                Highlights
+              <div class="arrow-d">▼ &nbsp; zwei unabhängige Pfade &nbsp; ▼</div>
+              <div
+                style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px"
+              >
+                <div class="flow-v">
+                  <div
+                    class="step"
+                    style="justify-content: center; font-size: 12.5px"
+                  >
+                    je Kapitel: ein Transkript
+                  </div>
+                  <div class="arrow-d">▼</div>
+                  <div
+                    class="step accent"
+                    style="justify-content: center; font-size: 13px"
+                  >
+                    LLM · Kapitel-Prompt
+                  </div>
+                  <div class="arrow-d">▼</div>
+                  <div
+                    class="step"
+                    style="justify-content: center; font-size: 12.5px"
+                  >
+                    🐘 <code style="margin-left: 6px">chapters.summary</code>
+                  </div>
+                </div>
+                <div class="flow-v">
+                  <div
+                    class="step"
+                    style="justify-content: center; font-size: 12.5px"
+                  >
+                    je Episode: alle Kapitel zu vollem Transkript verketten
+                  </div>
+                  <div class="arrow-d">▼</div>
+                  <div
+                    class="step accent"
+                    style="justify-content: center; font-size: 13px"
+                  >
+                    LLM · Episoden-Prompt
+                  </div>
+                  <div class="arrow-d">▼</div>
+                  <div
+                    class="step"
+                    style="justify-content: center; font-size: 12.5px"
+                  >
+                    🐘 <code style="margin-left: 6px">episodes.summary</code>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1925,6 +1968,18 @@
                 <span class="num">✓</span> Urteil plus Quellen
               </div>
             </div>
+          </div>
+          <div
+            class="note mt18"
+            style="
+              background: var(--glass);
+              border-color: var(--line);
+              color: var(--muted);
+            "
+          >
+            ↘ <b>Abzweig:</b> Findet die Web-Suche keine Quellen, wird der Claim
+            direkt als <code>UNVERIFIABLE</code> gespeichert, ganz ohne
+            LLM-Urteil. Mehrere Claims werden parallel recherchiert und bewertet.
           </div>
         </div>
       </section>
