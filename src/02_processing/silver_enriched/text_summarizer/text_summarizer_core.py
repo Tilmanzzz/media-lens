@@ -54,8 +54,8 @@ Create:
 2. Key takeaways of the highlights (bullet list)
 
 Output String:
-    Overall Summary:
     <summary here>
+    
     Key Takeaways:
     - <takeaway 1>
     - <takeaway 2>
