@@ -106,9 +106,10 @@ func (s *Store) BulkUpsertEpisodes(ctx context.Context, eps []Episode) ([]string
 	audioKeys := make([]string, len(eps))
 	coverKeys := make([]string, len(eps))
 	publishedAts := make([]*time.Time, len(eps))
-	durations := make([]*int, len(eps)) // Neues Array
+	durations := make([]*int, len(eps))
 	enclosureURLs := make([]string, len(eps))
 	batchIDs := make([]string, len(eps))
+	sourceSystemUpdatedAts := make([]*time.Time, len(eps))
 
 	for i, ep := range eps {
 		podcastIDs[i] = ep.PodcastID
@@ -117,25 +118,38 @@ func (s *Store) BulkUpsertEpisodes(ctx context.Context, eps []Episode) ([]string
 		audioKeys[i] = ep.AudioKey
 		coverKeys[i] = ep.CoverKey
 		publishedAts[i] = ep.PublishedAt
-		durations[i] = ep.DurationSeconds // Mapping
+		durations[i] = ep.DurationSeconds
 		enclosureURLs[i] = ep.EnclosureURL
 		batchIDs[i] = ep.BatchID
+		sourceSystemUpdatedAts[i] = ep.SourceSystemUpdatedAt
 	}
 
 	query := `
-		INSERT INTO episodes (podcast_id, guid, title, audio_key, cover_key, published_at, duration_seconds, enclosure_url, batch_id) 
+		INSERT INTO episodes (
+			podcast_id, 
+			guid, 
+			title, 
+			audio_key, 
+			cover_key, 
+			published_at, 
+			duration_seconds, 
+			enclosure_url, 
+			batch_id, 
+			source_system_updated_at
+		) 
 		SELECT * FROM unnest(
-			$1::uuid[], 
+			$1::text[]::uuid[], 
 			$2::text[], 
 			$3::text[], 
 			$4::text[], 
 			$5::text[], 
 			$6::timestamptz[], 
-			$7::integer[], 
+			$7::int[], 
 			$8::text[], 
-			$9::uuid[]
+			$9::text[]::uuid[], 
+			$10::timestamptz[]
 		)
-		ON CONFLICT (podcast_id, guid) DO UPDATE SET 
+		ON CONFLICT (guid) DO UPDATE SET 
 			title = EXCLUDED.title,
 			audio_key = EXCLUDED.audio_key,
 			cover_key = EXCLUDED.cover_key,
@@ -143,13 +157,13 @@ func (s *Store) BulkUpsertEpisodes(ctx context.Context, eps []Episode) ([]string
 			duration_seconds = EXCLUDED.duration_seconds,
 			enclosure_url = EXCLUDED.enclosure_url,
 			batch_id = EXCLUDED.batch_id,
-			ingested_at = NOW(),
-			ingestion_updated_at = NOW()
-		RETURNING id`
-
+			source_system_updated_at = EXCLUDED.source_system_updated_at
+		RETURNING id;
+	`
 	var ids []string
+
 	err := pgxscan.Select(ctx, s.Pool, &ids, query,
-		podcastIDs, guids, titles, audioKeys, coverKeys, publishedAts, durations, enclosureURLs, batchIDs,
+		podcastIDs, guids, titles, audioKeys, coverKeys, publishedAts, durations, enclosureURLs, batchIDs, sourceSystemUpdatedAts,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("bulk upsert failed: %w", err)

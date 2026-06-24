@@ -43,6 +43,7 @@ CREATE TABLE podcasts (
   -- lastUpdateTime: The channel-level pubDate for the feed, if it’s sane.
   source_system_updated_at          TIMESTAMPTZ,
   max_episodes        INT DEFAULT NULL,
+  xml_key             TEXT,
   CONSTRAINT ck_podcasts_episode_count CHECK (episode_count IS NULL OR episode_count >= 0),
   CONSTRAINT ck_podcasts_max_episodes CHECK (max_episodes IS NULL OR max_episodes >= 0)
 );
@@ -62,7 +63,6 @@ CREATE TABLE episodes (
   published_at    TIMESTAMPTZ,
   duration_seconds INTEGER,
   audio_key       TEXT          NOT NULL,
-  xml_key         TEXT,
   transcript_key  TEXT,
   cover_key       TEXT,
   ingested_at     TIMESTAMPTZ   NOT NULL DEFAULT NOW(),

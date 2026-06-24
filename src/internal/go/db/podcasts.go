@@ -102,6 +102,7 @@ func (s *Store) GetPodcastsForIngestion(ctx context.Context, mode string) ([]Pod
 	if mode == "full" {
 		query = `SELECT id, guid, feed_url, title, source_system_updated_at, max_episodes FROM podcasts`
 	} else {
+		// Tier 1 Delta: Only grab podcasts with new episodes
 		query = `
 			SELECT id, guid, feed_url, title, source_system_updated_at, max_episodes 
 			FROM podcasts 
@@ -131,14 +132,15 @@ func (s *Store) SyncPodcastMetadata(
 	return err
 }
 
-// MarkPodcastIngested is used by the Ingestion worker to track pipeline batches
-func (s *Store) MarkPodcastIngested(ctx context.Context, id string, batchID string) error {
+// MarkPodcastIngested now saves the xml_key to the podcast row
+func (s *Store) MarkPodcastIngested(ctx context.Context, id, batchID, xmlKey string) error {
 	query := `
 		UPDATE podcasts
 		SET batch_id = $2::uuid,
+		    xml_key = $3,
 		    ingested_at = NOW()
 		WHERE id = $1::uuid`
 
-	_, err := s.Pool.Exec(ctx, query, id, batchID)
+	_, err := s.Pool.Exec(ctx, query, id, batchID, xmlKey)
 	return err
 }

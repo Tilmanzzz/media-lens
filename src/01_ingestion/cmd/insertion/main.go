@@ -60,7 +60,16 @@ func main() {
 
 	if len(os.Args) < 2 {
 		seedURLs = []string{
+			"https://feeds.br.de/internet-girl-der-popkultur-podcast-mit-valentina-vapaux/feed.xml",
+			"https://cdn.julephosting.de/podcasts/1355-lanz-precht/feed.rss",
+			"https://www.tagesschau.de/multimedia/podcast/15-minuten/index~podcast.xml",
+			"https://feeds.megaphone.fm/RSV1597324942",
+			"https://feeds.megaphone.fm/surrounded",
+			"https://plot-house.podigee.io/feed/mp3",
 			"https://feeds.megaphone.fm/ADL5417720568",
+			"https://feeds.megaphone.fm/GLT9357919932",
+			"https://anchor.fm/s/fc0e8c18/podcast/rss",
+			"https://sternengeschichten.podigee.io/feed/mp3",
 			"https://rss.buzzsprout.com/1032730.rss",
 			"https://feeds.captivate.fm/thebest5minutewine/",
 			"https://feeds.transistor.fm/5-minute-morning-show",

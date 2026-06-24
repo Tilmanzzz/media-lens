@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -62,6 +64,8 @@ func main() {
 		if err := w.flushEpisodes(ctx, allEpisodes); err != nil {
 			log.Fatalf("critical database flush failed: %v", err)
 		}
+	} else {
+		fmt.Println("no episodes required ingestion")
 	}
 
 	if err := w.store.CompletePipelineBatch(ctx, batchID, "success"); err != nil {
@@ -95,12 +99,55 @@ func setupWorker(ctx context.Context) *worker {
 }
 
 func (w *worker) processPodcast(ctx context.Context, p db.Podcast, loadMode, batchID string) ([]db.Episode, error) {
-	feed, err := w.feedParser.ParseURLWithContext(p.FeedURL, ctx)
+	// fetch raw xml for storage
+	req, err := http.NewRequestWithContext(ctx, "GET", p.FeedURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// impersonate Apple Podcasts to avoid being blocked by CDNs
+	req.Header.Set("User-Agent", "AppleCoreMedia/1.0.0.19E266 (iPhone; U; CPU OS 15_4_1 like Mac OS X; en_us)")
+	req.Header.Set("Accept", "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+
+	resp, err := w.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch feed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("bad http status: %d", resp.StatusCode)
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	// upload feed snapshot to minio
+	xmlKey, err := w.bronze.UploadPodcastMetadata(
+		ctx,
+		p.ID,
+		"metadata",
+		"feed",
+		"application/xml",
+		bytes.NewReader(bodyBytes),
+		int64(len(bodyBytes)),
+		p.FeedURL,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to upload xml to minio: %w", err)
+	}
+
+	// parse feed from downloaded bytes
+	feed, err := w.feedParser.Parse(bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("feed parse error: %w", err)
 	}
 
-	if err := w.store.MarkPodcastIngested(ctx, p.ID, batchID); err != nil {
+	// mark ingested and save the xml path
+	if err := w.store.MarkPodcastIngested(ctx, p.ID, batchID, xmlKey); err != nil {
 		return nil, fmt.Errorf("failed to link batch to podcast record: %w", err)
 	}
 
@@ -141,14 +188,18 @@ func (w *worker) processEpisode(
 	}
 	enclosureURL := item.Enclosures[0].URL
 
+	// extract reliable timestamp
+	episodeUpdated := extractEpisodeTimestamp(item)
+
 	existingEp, exists := existingEps[item.GUID]
 	isChanged := loadMode == "full" || !exists
 
+	// tier 2 delta check: did this specific episode change?
 	if !isChanged {
 		if existingEp.EnclosureURL != enclosureURL {
 			isChanged = true
 		}
-		if item.PublishedParsed != nil && existingEp.PublishedAt != nil && item.PublishedParsed.After(*existingEp.PublishedAt) {
+		if existingEp.SourceSystemUpdatedAt.Before(episodeUpdated) {
 			isChanged = true
 		}
 	}
@@ -157,6 +208,7 @@ func (w *worker) processEpisode(
 		return nil, nil
 	}
 
+	// stop previous pipeline runs if replacing an episode
 	if exists && existingEp.BatchID != "" {
 		_ = w.store.StopPreviousBatchIfNeeded(ctx, existingEp.BatchID)
 	}
@@ -183,15 +235,16 @@ func (w *worker) processEpisode(
 	}
 
 	return &db.Episode{
-		PodcastID:       p.ID,
-		GUID:            item.GUID,
-		Title:           item.Title,
-		AudioKey:        audioKey,
-		CoverKey:        coverKey,
-		PublishedAt:     item.PublishedParsed,
-		DurationSeconds: duration,
-		EnclosureURL:    enclosureURL,
-		BatchID:         batchID,
+		PodcastID:             p.ID,
+		GUID:                  item.GUID,
+		Title:                 item.Title,
+		AudioKey:              audioKey,
+		CoverKey:              coverKey,
+		PublishedAt:           item.PublishedParsed,
+		DurationSeconds:       duration,
+		EnclosureURL:          enclosureURL,
+		BatchID:               batchID,
+		SourceSystemUpdatedAt: &episodeUpdated,
 	}, nil
 }
 
@@ -204,7 +257,8 @@ func (w *worker) uploadMedia(
 		return "", err
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	// impersonate Apple Podcasts to bypass CDNs
+	req.Header.Set("User-Agent", "AppleCoreMedia/1.0.0.19E266 (iPhone; U; CPU OS 15_4_1 like Mac OS X; en_us)")
 	req.Header.Set("Accept", acceptHeader)
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 
@@ -234,6 +288,42 @@ func (w *worker) uploadMedia(
 func (w *worker) flushEpisodes(ctx context.Context, eps []db.Episode) error {
 	_, err := w.store.BulkUpsertEpisodes(ctx, eps)
 	return err
+}
+
+func extractEpisodeTimestamp(item *gofeed.Item) time.Time {
+	// 1. try standard parsed fields first
+	if item.UpdatedParsed != nil {
+		return item.UpdatedParsed.Truncate(time.Second)
+	}
+	if item.PublishedParsed != nil {
+		return item.PublishedParsed.Truncate(time.Second)
+	}
+
+	// 2. fallback to raw string
+	rawDate := item.Updated
+	if rawDate == "" {
+		rawDate = item.Published
+	}
+
+	// 3. aggressively force parse against common formats
+	if rawDate != "" {
+		formats := []string{
+			time.RFC1123Z, time.RFC1123, time.RFC822Z, time.RFC822,
+			time.RFC3339, time.RFC3339Nano,
+			"Mon, 2 Jan 2006 15:04:05 -0700",
+			"2006-01-02T15:04:05-0700",
+		}
+
+		for _, format := range formats {
+			if parsed, err := time.Parse(format, strings.TrimSpace(rawDate)); err == nil {
+				return parsed.Truncate(time.Second)
+			}
+		}
+		log.Printf("[Warning] Failed to parse custom date format: %s", rawDate)
+	}
+
+	// 4. absolute fallback prevents infinite delta loops
+	return time.Unix(0, 0)
 }
 
 func extractImageURL(item *gofeed.Item) string {

@@ -40,11 +40,33 @@ func NewBucket(endpoint, user, pass, name string) (*Bucket, error) {
 	return &Bucket{client: client, name: name}, nil
 }
 
-// UploadAsset streams the asset directly to an entity-first, deterministic path
+// UploadPodcastMetadata uploads show-level assets directly to the podcast root path.
+func (b *Bucket) UploadPodcastMetadata(ctx context.Context, podcastID, assetType, filename, contentType string, body io.Reader, size int64, sourceURL string) (string, error) {
+	ext := extensionFromContentType(contentType)
+	objectKey := fmt.Sprintf("%s/%s/%s%s", podcastID, assetType, filename, ext)
+
+	opts := minio.PutObjectOptions{
+		ContentType: contentType,
+		UserMetadata: map[string]string{
+			"podcast-id": podcastID,
+		},
+	}
+
+	if sourceURL != "" {
+		opts.UserMetadata["source-url"] = sourceURL
+	}
+
+	_, err := b.client.PutObject(ctx, b.name, objectKey, body, size, opts)
+	if err != nil {
+		return "", fmt.Errorf("metadata upload failed: %w", err)
+	}
+
+	return objectKey, nil
+}
+
+// UploadAsset streams episode-level media to an entity-first, deterministic path.
 func (b *Bucket) UploadAsset(ctx context.Context, podcastID, episodeGUID, assetType, filename, contentType string, body io.Reader, size int64, sourceURL string) (string, error) {
 	ext := extensionFromContentType(contentType)
-
-	// Entity-First Path Layout: {podcastID}/{episodeGUID}/{assetType}/{filename}{ext}
 	objectKey := fmt.Sprintf("%s/%s/%s/%s%s", podcastID, episodeGUID, assetType, filename, ext)
 
 	opts := minio.PutObjectOptions{
@@ -61,7 +83,7 @@ func (b *Bucket) UploadAsset(ctx context.Context, podcastID, episodeGUID, assetT
 
 	_, err := b.client.PutObject(ctx, b.name, objectKey, body, size, opts)
 	if err != nil {
-		return "", fmt.Errorf("upload failed: %w", err)
+		return "", fmt.Errorf("episode asset upload failed: %w", err)
 	}
 
 	return objectKey, nil
@@ -105,8 +127,9 @@ func extensionFromContentType(ct string) string {
 		return ".jpg"
 	case strings.Contains(ct, "image/png"):
 		return ".png"
+	case strings.Contains(ct, "xml"):
+		return ".xml"
 	default:
-		// Fallback identifier if parsing fails
 		if strings.Contains(ct, "image") {
 			return ".img"
 		}
