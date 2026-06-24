@@ -58,7 +58,14 @@ export default async function PodcastDetail({ params }: { params: Promise<{ id: 
     fact_checked_claims: claimsByChapter.get(ch.id) ?? [],
   }));
 
-  const emotionData = { segments: [] };
+  const emotionData = {
+    segments: transcriptResult.lines.map((line) => ({
+      start: line.start_time,
+      end: line.end_time,
+      dominant: line.emotion,
+      score: line.emotion_score,
+    })),
+  };
 
   const recommended = recommendedResult.items
     .filter((ep) => ep.id !== id)

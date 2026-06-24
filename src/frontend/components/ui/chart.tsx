@@ -18,14 +18,10 @@ interface EmotionChartProps {
 }
 
 const EMOTION_COLORS: Record<string, string> = {
-  Anger:        "#E24B4A",
-  Calm:  "#5DCAA5",
-  Disgust:   "#7F77DD",
-  Fear:           "#EF9F27",
-  Happy:          "#9FE1CB",
-  Neutral:     "#888780",
-  Sad:    "#B4B2A9",
-  Surprised:       "#97C459",
+  angry:   "#E24B4A",
+  happy:   "#9FE1CB",
+  neutral: "#888780",
+  sad:     "#B4B2A9",
 };
 
 function formatTime(seconds: number): string {

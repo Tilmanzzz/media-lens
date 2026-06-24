@@ -23,6 +23,7 @@ export default function RagChat({
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
+    if (messages.length === 0) return;
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
