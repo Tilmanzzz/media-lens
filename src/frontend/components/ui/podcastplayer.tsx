@@ -65,11 +65,11 @@ export default function PodcastPlayer({
 
       {/* 3. Themen + Faktencheck nebeneinander */}
       {(showThemen || showFaktencheck) && (
-        <div className="flex flex-row gap-6 items-start">
+        <div className="flex flex-col gap-6  lg:items-start">
 
           {showThemen && (
-            <div className="flex-1">
-              <p className="text-sm text-foreground-muted mb-3">Themen</p>
+            <div className="w-100">
+              <p className="text-lg text-foreground-subtle mb-3">Chapters</p>
               <div className="flex flex-col gap-3">
                 {sorted.map((chapter, index) => (
                   <TopicCard
@@ -91,33 +91,35 @@ export default function PodcastPlayer({
           )}
 
           {showFaktencheck && (
-            <div className="flex-1">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-sm text-foreground-muted">
-                  Faktencheck
-                  {filteredChapterName && (
-                    <span className="ml-2 text-xs text-accent">· {filteredChapterName}</span>
-                  )}
-                </p>
-                {filteredChapterIndex !== null && (
-                  <button
-                    onClick={() => setFilteredChapterIndex(null)}
-                    className="text-xs text-foreground-subtle hover:text-foreground transition-colors cursor-pointer"
-                  >
-                    Alle anzeigen ×
-                  </button>
-                )}
-              </div>
-              <div className="flex flex-col gap-3">
-                {visibleClaims.length > 0 ? (
-                  visibleClaims.map((claim) => (
-                    <FactCheckCard key={claim.id} claim={claim} />
-                  ))
-                ) : (
-                  <p className="text-xs text-foreground-subtle">
-                    Keine Fakten für dieses Thema vorhanden.
+            <div className="lg:flex-[1]">
+              <div className="rounded-2xl border border-border bg-background-card p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-lg text-foreground-subtle">
+                    Factcheck
+                    {filteredChapterName && (
+                      <span className="ml-2 text-xs text-accent">· {filteredChapterName}</span>
+                    )}
                   </p>
-                )}
+                  {filteredChapterIndex !== null && (
+                    <button
+                      onClick={() => setFilteredChapterIndex(null)}
+                      className="text-xs text-foreground-subtle hover:text-foreground transition-colors cursor-pointer"
+                    >
+                      Show all x
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-col gap-3">
+                  {visibleClaims.length > 0 ? (
+                    visibleClaims.map((claim) => (
+                      <FactCheckCard key={claim.id} claim={claim} />
+                    ))
+                  ) : (
+                    <p className="text-xs text-foreground-subtle">
+                     No Facts found.
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -128,7 +130,7 @@ export default function PodcastPlayer({
       {/* 4. Transkript – volle Breite unter Themen/Faktencheck */}
       {showTranscript && allLines.length > 0 && (
         <div>
-          <p className="text-sm text-foreground-muted mb-3">Transkript</p>
+          <p className="text-lg text-foreground-subtle mb-3">Transcript</p>
           <Transcript
             lines={allLines}
             currentTime={currentTime}

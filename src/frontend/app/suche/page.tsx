@@ -15,11 +15,10 @@ function formatDuration(seconds: number): string {
 export default async function SearchPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: { q?: string };
 }) {
-  const { q } = await searchParams;
-  const query = q ?? "";
-
+  const query = searchParams.q ?? "";
+  
   if (!query) {
     return (
       <div className="mx-auto max-w-7xl px-4 py-12">

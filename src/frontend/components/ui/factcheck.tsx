@@ -5,11 +5,11 @@ interface FactCheckCardProps {
 }
 
 const verdictConfig: Record<FactVerdict, { label: string; bg: string; border: string; text: string }> = {
-  TRUE:         { label: "Wahr",          bg: "bg-success-bg",      border: "border-success",  text: "text-success"  },
-  MOSTLY_TRUE:  { label: "Überwiegend wahr", bg: "bg-success-bg",   border: "border-success",  text: "text-success"  },
-  MISLEADING:   { label: "Irreführend",   bg: "bg-warning-bg",      border: "border-warning",  text: "text-warning"  },
-  FALSE:        { label: "Falsch",        bg: "bg-danger-bg",       border: "border-danger",   text: "text-danger"   },
-  UNVERIFIABLE: { label: "Unprüfbar",     bg: "bg-background-card", border: "border-border",   text: "text-foreground-subtle" },
+  TRUE:         { label: "True",          bg: "bg-success-bg",      border: "border-success",  text: "text-success"  },
+  MOSTLY_TRUE:  { label: "Mostly true", bg: "bg-success-bg",   border: "border-success",  text: "text-success"  },
+  MISLEADING:   { label: "Misleading",   bg: "bg-warning-bg",      border: "border-warning",  text: "text-warning"  },
+  FALSE:        { label: "False",        bg: "bg-danger-bg",       border: "border-danger",   text: "text-danger"   },
+  UNVERIFIABLE: { label: "Unverrifiable",     bg: "bg-background-card", border: "border-border",   text: "text-foreground-subtle" },
 };
 
 export function FactCheckCard({ claim }: FactCheckCardProps) {

@@ -14,7 +14,7 @@ interface RagChatProps {
 
 export default function RagChat({
   episodeId,
-  placeholder = "Frag etwas zu dieser Episode...",
+  placeholder = "Ask something about the episode..",
 }: RagChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -50,7 +50,7 @@ export default function RagChat({
     } catch {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "Fehler beim Abrufen der Antwort." },
+        { role: "assistant", content: "Error searching for an answer." },
       ]);
     } finally {
       setIsLoading(false);
@@ -80,9 +80,6 @@ export default function RagChat({
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full gap-2 text-center py-8">
-            <p className="text-sm text-foreground-subtle">
-              Stelle Fragen zum Inhalt dieser Episode.
-            </p>
           </div>
         )}
 
