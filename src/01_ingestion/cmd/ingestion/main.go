@@ -3,15 +3,19 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/mmcdole/gofeed"
 	"github.com/tilmanzzz/media-lens/internal/go/blob"
 	"github.com/tilmanzzz/media-lens/internal/go/db"
@@ -24,54 +28,143 @@ type worker struct {
 	feedParser *gofeed.Parser
 }
 
+type triggerPayload struct {
+	LoadMode string `json:"load_mode"`
+}
+
 func main() {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	w := setupWorker(ctx)
 	defer w.store.Close()
 
-	loadMode := os.Getenv("LOAD_MODE")
-	if loadMode != "full" && loadMode != "delta" {
-		loadMode = "delta"
+	pgURL := os.Getenv("POSTGRES_URL")
+	if pgURL == "" {
+		log.Fatal("POSTGRES_URL environment variable is required")
 	}
 
+	go listenForTriggers(ctx, w, pgURL)
+
+	log.Println("Ingestion worker started, actively listening for triggers...")
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
+
+	log.Println("Termination signal received. Shutting down ingestion worker...")
+}
+
+func listenForTriggers(ctx context.Context, w *worker, pgURL string) {
+	for {
+		err := listenLoop(ctx, w, pgURL)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Printf("Listener error: %v. Reconnecting in 5s...", err)
+			time.Sleep(5 * time.Second)
+		}
+	}
+}
+
+func listenLoop(ctx context.Context, w *worker, pgURL string) error {
+	conn, err := pgx.Connect(ctx, pgURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect for listening: %w", err)
+	}
+	defer conn.Close(ctx)
+
+	_, err = conn.Exec(ctx, "LISTEN ingestion_trigger")
+	if err != nil {
+		return fmt.Errorf("failed to execute LISTEN: %w", err)
+	}
+
+	// Keep-alive heartbeat
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_ = conn.Ping(ctx)
+			}
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+			notification, err := conn.WaitForNotification(ctx)
+			if err != nil {
+				return err
+			}
+
+			var payload triggerPayload
+			if err := json.Unmarshal([]byte(notification.Payload), &payload); err != nil {
+				log.Printf("Invalid payload received: %s", notification.Payload)
+				continue
+			}
+
+			mode := payload.LoadMode
+			if mode != "full" && mode != "delta" {
+				mode = "delta"
+			}
+
+			log.Printf("Received trigger. Starting ingestion cycle [mode: %s]", mode)
+			runIngestionCycle(ctx, w, mode)
+		}
+	}
+}
+
+func runIngestionCycle(ctx context.Context, w *worker, loadMode string) {
 	batchID, err := w.store.CreatePipelineBatch(ctx, "ingestion", loadMode)
 	if err != nil {
-		log.Fatalf("failed to start batch: %v", err)
+		log.Printf("Failed to start batch: %v", err)
+		return
 	}
-	fmt.Printf("started pipeline batch [%s] mode: %s\n", batchID, loadMode)
+	fmt.Printf("Started pipeline batch [%s] mode: %s\n", batchID, loadMode)
 
 	podcasts, err := w.store.GetPodcastsForIngestion(ctx, loadMode)
 	if err != nil {
-		log.Fatalf("failed to fetch target podcasts: %v", err)
+		log.Printf("Failed to fetch target podcasts: %v", err)
+		_ = w.store.CompletePipelineBatch(ctx, batchID, "failed")
+		return
 	}
 
 	var allEpisodes []db.Episode
 
 	for _, p := range podcasts {
-		fmt.Printf("processing feed episodes: %s\n", p.FeedURL)
+		fmt.Printf("Processing feed episodes: %s\n", p.FeedURL)
 
 		eps, err := w.processPodcast(ctx, p, loadMode, batchID)
 		if err != nil {
-			log.Printf("skipping podcast %s: %v", p.ID, err)
+			log.Printf("Skipping podcast %s: %v", p.ID, err)
 			continue
 		}
 		allEpisodes = append(allEpisodes, eps...)
 	}
 
 	if len(allEpisodes) > 0 {
-		fmt.Printf("flushing global batch: writing %d episodes...\n", len(allEpisodes))
+		fmt.Printf("Flushing global batch: writing %d episodes...\n", len(allEpisodes))
 		if err := w.flushEpisodes(ctx, allEpisodes); err != nil {
-			log.Fatalf("critical database flush failed: %v", err)
+			log.Printf("Critical database flush failed: %v", err)
+			_ = w.store.CompletePipelineBatch(ctx, batchID, "failed")
+			return
 		}
 	} else {
-		fmt.Println("no episodes required ingestion")
+		fmt.Println("No episodes required ingestion")
 	}
 
 	if err := w.store.CompletePipelineBatch(ctx, batchID, "success"); err != nil {
-		log.Fatalf("failed to close batch: %v", err)
+		log.Printf("Failed to close batch: %v", err)
+		return
 	}
-	fmt.Printf("successfully completed batch %s\n", batchID)
+	fmt.Printf("Successfully completed batch %s\n", batchID)
 }
 
 func setupWorker(ctx context.Context) *worker {

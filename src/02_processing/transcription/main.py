@@ -7,8 +7,9 @@ import signal
 import tempfile
 import asyncpg
 import aiohttp
-from typing import Tuple
+from typing import Tuple, Dict, Any
 from minio import Minio
+from minio.error import S3Error
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
@@ -23,7 +24,7 @@ logger_instance = AppLogger(
 logger = logger_instance.build()
 
 shutdown_event = asyncio.Event()
-internal_task_queue = asyncio.Queue()
+internal_task_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
 
 
 def handle_exit_signals():
@@ -40,22 +41,27 @@ def init_minio_clients() -> Tuple[Minio, Minio]:
     user = os.getenv("MINIO_USER", "minioadmin")
     password = os.getenv("MINIO_PASS", "minioadmin")
 
-    # keeping clients separate for bronze/silver logical separation
     bronze = Minio(minio_endpoint, access_key=user, secret_key=password, secure=False)
     silver = Minio(minio_endpoint, access_key=user, secret_key=password, secure=False)
 
-    # make sure buckets exist before we start pulling jobs
     for bucket_name in ["bronze", "silver"]:
-        if not bronze.bucket_exists(bucket_name):
-            logger.info(f"creating missing bucket: {bucket_name}")
-            bronze.make_bucket(bucket_name)
+        try:
+            if not bronze.bucket_exists(bucket_name):
+                logger.info(f"creating missing bucket: {bucket_name}")
+                bronze.make_bucket(bucket_name)
+        except S3Error as e:
+            # If the Go worker created the bucket at the same time Minio will throw an S3Error
+            if e.code in ["BucketAlreadyExists", "BucketAlreadyOwnedByYou"]:
+                logger.info(
+                    f"bucket {bucket_name} was already created by another worker."
+                )
+            else:
+                raise e
 
     return bronze, silver
 
 
 async def postgres_listener_task(pg_url: str):
-    # listen for pg notify events. includes a heartbeat so the connection
-    # doesn't get silently dropped by docker's nat network.
     while not shutdown_event.is_set():
         conn = None
         try:
@@ -64,15 +70,20 @@ async def postgres_listener_task(pg_url: str):
             def display_notification(connection, pid, channel, payload):
                 try:
                     event_data = json.loads(payload)
-                    if batch_id := event_data.get("batch_id"):
-                        internal_task_queue.put_nowait(batch_id)
+                    mode = event_data.get("load_mode", "delta")
+
+                    if mode == "full":
+                        internal_task_queue.put_nowait({"mode": "full"})
+                    elif batch_id := event_data.get("batch_id"):
+                        internal_task_queue.put_nowait(
+                            {"mode": "delta", "batch_id": batch_id}
+                        )
                 except Exception as e:
                     logger.error(f"failed to parse notification: {e}")
 
             await conn.add_listener("transcription_ready", display_notification)
             logger.info("listening on 'transcription_ready'")
 
-            # ping db every 30s to keep connection alive
             while not shutdown_event.is_set():
                 await asyncio.sleep(30)
                 await conn.execute("SELECT 1")
@@ -92,7 +103,6 @@ async def postgres_listener_task(pg_url: str):
 
 
 async def queue_backlog_batches(store: Store):
-    # pick up any batches that succeeded in ingestion but haven't been transcribed yet
     try:
         missed_batches = await store.pool.fetch(
             """
@@ -102,7 +112,9 @@ async def queue_backlog_batches(store: Store):
             """
         )
         for row in missed_batches:
-            internal_task_queue.put_nowait(str(row["id"]))
+            internal_task_queue.put_nowait(
+                {"mode": "delta", "batch_id": str(row["id"])}
+            )
 
         if missed_batches:
             logger.info(f"queued {len(missed_batches)} backlog batches")
@@ -156,7 +168,6 @@ async def process_episode(
 
         logger.info(f"transcribing {ep.title} via remote API at {api_url}")
 
-        # async post request to the whisper server
         async with aiohttp.ClientSession() as session:
             data = aiohttp.FormData()
             data.add_field(
@@ -167,7 +178,6 @@ async def process_episode(
             data.add_field("language", "en")
             data.add_field("response_format", "verbose_json")
 
-            # set a 1-hour timeout for long episodes
             timeout = aiohttp.ClientTimeout(total=3600)
 
             async with session.post(api_url, data=data, timeout=timeout) as resp:
@@ -179,11 +189,10 @@ async def process_episode(
 
                 api_response = await resp.json()
 
-        # map standard whisper json response to our internal format
         raw_output = {
             "metadata": {
                 "language": api_response.get("language", "en"),
-                "language_probability": 1.0,  # usually missing in basic api responses
+                "language_probability": 1.0,
                 "duration": api_response.get("duration", 0.0),
             },
             "text": api_response.get("text", "").strip(),
@@ -210,7 +219,6 @@ async def process_episode(
 
             raw_output["segments"].append(mapped_segment)
 
-    # target path: audio/pid/guid/transcript.json
     base_dir = os.path.dirname(ep.audio_key)
     transcript_key = f"{base_dir}/transcript.json"
 
@@ -218,34 +226,41 @@ async def process_episode(
 
     logger.info(f"updating db ref for {transcript_key}")
     await store.set_transcript_key(ep.id, transcript_key)
+    await store.set_ingestion_updated_at(ep.id)
 
 
-async def claim_and_process_batch(
-    ingestion_batch_id: str,
+async def handle_pipeline_task(
+    task: Dict[str, Any],
     store: Store,
     bronze: Minio,
     silver: Minio,
 ):
-    logger.info(f"processing workload from ingestion batch: {ingestion_batch_id}")
+    mode = task.get("mode", "delta")
+    transcription_batch_id = await store.create_pipeline_batch("transcription", mode)
 
-    transcription_batch_id = await store.create_pipeline_batch("transcription", "full")
-
-    # claim episodes atomically so other workers don't grab them
-    episode_ids = await store.claim_batch_episodes(
-        ingestion_batch_id, transcription_batch_id
-    )
+    if mode == "full":
+        logger.info(
+            f"processing full database workload for batch: {transcription_batch_id}"
+        )
+        episode_ids = await store.get_episodes_for_full_transcription()
+    else:
+        ingestion_batch_id = task["batch_id"]
+        logger.info(
+            f"processing delta workload from ingestion batch: {ingestion_batch_id}"
+        )
+        episode_ids = await store.claim_batch_episodes(
+            ingestion_batch_id, transcription_batch_id
+        )
 
     if not episode_ids:
-        logger.info(
-            f"workload {ingestion_batch_id} already claimed or empty. discarding."
-        )
+        logger.info(f"workload empty. discarding batch {transcription_batch_id}.")
         await store.pool.execute(
             "DELETE FROM pipeline_batches WHERE id = $1", transcription_batch_id
         )
         return
 
     logger.info(
-        f"claimed {len(episode_ids)} episodes for batch {transcription_batch_id}"
+        f"processing {len(episode_ids)} episodes for batch {transcription_batch_id} (mode: {mode})"
     )
 
     for episode_id in episode_ids:
@@ -257,6 +272,7 @@ async def claim_and_process_batch(
     await store.complete_pipeline_batch(
         batch_id=transcription_batch_id,
         status="success",
+        load_mode=mode,
         notify_channel="segmenting_ready",
     )
 
@@ -280,15 +296,11 @@ async def main():
     while not shutdown_event.is_set():
         try:
             try:
-                ingestion_batch_id = await asyncio.wait_for(
-                    internal_task_queue.get(), timeout=1.0
-                )
+                task = await asyncio.wait_for(internal_task_queue.get(), timeout=1.0)
             except asyncio.TimeoutError:
                 continue
 
-            await claim_and_process_batch(
-                ingestion_batch_id, store, minio_bronze, minio_silver
-            )
+            await handle_pipeline_task(task, store, minio_bronze, minio_silver)
             internal_task_queue.task_done()
 
         except asyncio.CancelledError:

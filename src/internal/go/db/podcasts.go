@@ -113,23 +113,40 @@ func (s *Store) GetPodcastsForIngestion(ctx context.Context, mode string) ([]Pod
 	return pp, err
 }
 
-// SyncPodcastMetadata is used by the Metadata module (Insertion) to overwrite show-level data
+// SyncPodcastMetadata is used by the Metadata module (Insertion) to overwrite show-level data.
+// It returns true if the record was actually updated (meaning the metadata changed, or a newer/initial timestamp was applied).
 func (s *Store) SyncPodcastMetadata(
 	ctx context.Context,
 	id, guid, title, description, hosts string,
 	sourceSystemUpdatedAt *time.Time,
-) error {
+) (bool, error) {
 	query := `
 		UPDATE podcasts
 		SET guid = $2,
 		    title = $3,
 		    description = $4,
 		    hosts = $5, 
-		    source_system_updated_at = $6
-		WHERE id = $1::uuid`
+		    source_system_updated_at = CASE 
+		        WHEN source_system_updated_at IS NULL THEN COALESCE($6, NOW()) 
+		        WHEN $6 > source_system_updated_at THEN $6 
+		        ELSE source_system_updated_at 
+		    END
+		WHERE id = $1::uuid
+		  AND (
+		      guid IS DISTINCT FROM $2 OR
+		      title IS DISTINCT FROM $3 OR
+		      description IS DISTINCT FROM $4 OR
+		      hosts IS DISTINCT FROM $5 OR
+		      source_system_updated_at IS NULL OR 
+		      $6 > source_system_updated_at
+		  )`
 
-	_, err := s.Pool.Exec(ctx, query, id, guid, title, description, hosts, sourceSystemUpdatedAt)
-	return err
+	tag, err := s.Pool.Exec(ctx, query, id, guid, title, description, hosts, sourceSystemUpdatedAt)
+	if err != nil {
+		return false, err
+	}
+
+	return tag.RowsAffected() > 0, nil
 }
 
 // MarkPodcastIngested now saves the xml_key to the podcast row

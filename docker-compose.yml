@@ -44,72 +44,6 @@ services:
       timeout: 5s
       retries: 1
 
-  ingestion:
-    build:
-      context: ./src
-      dockerfile: ./01_ingestion/Dockerfile
-      target: ingestion
-    depends_on:
-      minio:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    env_file:
-      - .env
-    environment:
-      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
-      - MINIO_USER=${MINIO_USER}
-      - MINIO_PASS=${MINIO_PASS}
-      - POSTGRES_URL=${POSTGRES_URL}
-      - LOAD_MODE=${LOAD_MODE}
-
-  insertion:
-    build:
-      context: ./src/
-      dockerfile: ./01_ingestion/Dockerfile
-      target: insertion
-    depends_on:
-      minio:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    env_file:
-      - .env
-    profiles: ["tools"]
-    environment:
-      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
-      - MINIO_USER=${MINIO_USER}
-      - MINIO_PASS=${MINIO_PASS}
-      - POSTGRES_URL=${POSTGRES_URL}
-
-  transcription:
-    build:
-      context: ./src/
-      dockerfile: ./02_processing/transcription/Dockerfile
-    depends_on:
-      minio:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    env_file:
-      - .env
-    environment:
-      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
-      - MINIO_USER=${MINIO_USER}
-      - MINIO_PASS=${MINIO_PASS}
-      - POSTGRES_URL=${POSTGRES_URL}
-      - USE_CUDA=true
-      - LOG_DIR=${LOG_DIR}
-    volumes:
-      - ./logs/transcription:/app/logs
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
   sectioning:
     build:
       context: ./src
@@ -137,7 +71,78 @@ services:
               count: all
               capabilities: [gpu]
 
- 
+  transcription:
+    build:
+      context: ./src/
+      dockerfile: ./02_processing/transcription/Dockerfile
+    depends_on:
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      sectioning:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - POSTGRES_URL=${POSTGRES_URL}
+      - USE_CUDA=true
+      - LOG_DIR=${LOG_DIR}
+    volumes:
+      - ./logs/transcription:/app/logs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  ingestion:
+    build:
+      context: ./src
+      dockerfile: ./01_ingestion/Dockerfile
+      target: ingestion
+    depends_on:
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      transcription:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - POSTGRES_URL=${POSTGRES_URL}
+      - LOAD_MODE=${LOAD_MODE}
+
+  insertion:
+    build:
+      context: ./src/
+      dockerfile: ./01_ingestion/Dockerfile
+      target: insertion
+    depends_on:
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      ingestion:
+        condition: service_started
+    env_file:
+      - .env
+    profiles: ["tools"]
+    environment:
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - POSTGRES_URL=${POSTGRES_URL}
+
   backend:
     build: ./src/backend
     ports:

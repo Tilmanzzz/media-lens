@@ -18,7 +18,7 @@ from internal.python.db.store import Store
 from common.app_logger import AppLogger
 
 logger_instance = AppLogger(
-    module_name="sectioning_worker",  # use "transcription_worker" for the other file
+    module_name="sectioning_worker",
     enabled=True,
     level=os.getenv("LOG_LEVEL", "INFO"),
     log_dir=os.getenv("LOG_DIR", "/app/logs"),
@@ -26,7 +26,7 @@ logger_instance = AppLogger(
 logger = logger_instance.build()
 
 shutdown_event = asyncio.Event()
-internal_task_queue: asyncio.Queue[str] = asyncio.Queue()
+internal_task_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
 
 gemini_client = genai.Client()
 
@@ -269,19 +269,36 @@ async def process_episode(
     )
 
 
-async def claim_and_process_batch(
-    transcription_batch_id: str, store: Store, minio: Minio
+async def handle_pipeline_task(
+    task: Dict[str, Any], store: Store, minio: Minio
 ) -> None:
-    segmenting_batch_id = await store.create_pipeline_batch("segmenting", "full")
-    episode_ids = await store.claim_batch_episodes(
-        transcription_batch_id, segmenting_batch_id
-    )
+    mode = task.get("mode", "delta")
+    segmenting_batch_id = await store.create_pipeline_batch("segmenting", mode)
+
+    if mode == "full":
+        logger.info(
+            f"processing full database workload for batch: {segmenting_batch_id}"
+        )
+        episode_ids = await store.get_episodes_for_full_sectioning()
+    else:
+        transcription_batch_id = task["batch_id"]
+        logger.info(
+            f"processing delta workload from transcription batch: {transcription_batch_id}"
+        )
+        episode_ids = await store.claim_batch_episodes(
+            transcription_batch_id, segmenting_batch_id
+        )
 
     if not episode_ids:
+        logger.info(f"workload empty. discarding batch {segmenting_batch_id}.")
         await store.pool.execute(
             "DELETE FROM pipeline_batches WHERE id = $1", segmenting_batch_id
         )
         return
+
+    logger.info(
+        f"processing {len(episode_ids)} episodes for batch {segmenting_batch_id} (mode: {mode})"
+    )
 
     for episode_id in episode_ids:
         await process_episode(episode_id, segmenting_batch_id, store, minio)
@@ -289,6 +306,7 @@ async def claim_and_process_batch(
     await store.complete_pipeline_batch(
         batch_id=segmenting_batch_id,
         status="success",
+        load_mode=mode,
         notify_channel="processing_ready",
     )
 
@@ -300,8 +318,13 @@ async def postgres_listener_task(pg_url: str) -> None:
 
             def on_notification(connection, pid, channel, payload):
                 event = json.loads(payload)
-                if batch_id := event.get("batch_id"):
-                    internal_task_queue.put_nowait(batch_id)
+                mode = event.get("load_mode", "delta")
+                if mode == "full":
+                    internal_task_queue.put_nowait({"mode": "full"})
+                elif batch_id := event.get("batch_id"):
+                    internal_task_queue.put_nowait(
+                        {"mode": "delta", "batch_id": batch_id}
+                    )
 
             await conn.add_listener("segmenting_ready", on_notification)
             while not shutdown_event.is_set():
@@ -319,7 +342,7 @@ async def queue_backlog_batches(store: Store) -> None:
         "SELECT id FROM pipeline_batches WHERE stage = 'transcription' AND status = 'success' ORDER BY start_ts ASC"
     )
     for row in rows:
-        internal_task_queue.put_nowait(str(row["id"]))
+        internal_task_queue.put_nowait({"mode": "delta", "batch_id": str(row["id"])})
 
 
 async def main() -> None:
@@ -340,19 +363,17 @@ async def main() -> None:
 
     sem = asyncio.Semaphore(5)
 
-    async def worker(batch_id: str):
+    async def worker(task: Dict[str, Any]):
         async with sem:
             try:
-                await claim_and_process_batch(batch_id, store, minio)
+                await handle_pipeline_task(task, store, minio)
             except Exception as e:
-                logger.error(f"Failed to process batch {batch_id}: {e}")
+                logger.error(f"Failed to process task {task}: {e}")
 
     while not shutdown_event.is_set():
         try:
-            transcription_batch_id = await asyncio.wait_for(
-                internal_task_queue.get(), timeout=1.0
-            )
-            asyncio.create_task(worker(transcription_batch_id))
+            task = await asyncio.wait_for(internal_task_queue.get(), timeout=1.0)
+            asyncio.create_task(worker(task))
             internal_task_queue.task_done()
         except asyncio.TimeoutError:
             continue

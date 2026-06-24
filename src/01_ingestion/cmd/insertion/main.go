@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -10,15 +11,16 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/mmcdole/gofeed"
 
 	"github.com/tilmanzzz/media-lens/internal/go/db"
 )
 
 const (
-	discoveryInterval = 1 * time.Minute
+	discoveryInterval = 3 * time.Minute
 	pollingInterval   = 1 * time.Minute
-	maxDiscoveryTicks = 2
+	maxDiscoveryTicks = 3
 )
 
 func strPtr(s string) *string {
@@ -61,7 +63,6 @@ func main() {
 	if len(os.Args) < 2 {
 		seedURLs = []string{
 			"https://feeds.br.de/internet-girl-der-popkultur-podcast-mit-valentina-vapaux/feed.xml",
-			"https://cdn.julephosting.de/podcasts/1355-lanz-precht/feed.rss",
 			"https://www.tagesschau.de/multimedia/podcast/15-minuten/index~podcast.xml",
 			"https://feeds.megaphone.fm/RSV1597324942",
 			"https://feeds.megaphone.fm/surrounded",
@@ -74,6 +75,7 @@ func main() {
 			"https://feeds.captivate.fm/thebest5minutewine/",
 			"https://feeds.transistor.fm/5-minute-morning-show",
 			"https://feed.podbean.com/themicropodcast/feed.xml",
+			//"https://cdn.julephosting.de/podcasts/1355-lanz-precht/feed.rss",
 		}
 	} else {
 		seedURLs = os.Args[1:]
@@ -170,7 +172,7 @@ func runDiscoveryPass(ctx context.Context, store *db.Store, parser *gofeed.Parse
 		}
 
 		episodeCount := len(feed.Items)
-		maxEpisodes := 3
+		maxEpisodes := 1
 
 		var remoteUpdateTime *time.Time
 		if feed.UpdatedParsed != nil {
@@ -220,6 +222,10 @@ func runDiscoveryPass(ctx context.Context, store *db.Store, parser *gofeed.Parse
 	}
 
 	log.Printf("[Discovery] Cycle finished. Registered %d new podcast targets.", discoveredCount)
+
+	if discoveredCount > 0 {
+		sendIngestionTrigger(ctx, os.Getenv("POSTGRES_URL"), "delta")
+	}
 }
 
 func startPollingLoop(ctx context.Context, store *db.Store, parser *gofeed.Parser, interval time.Duration) {
@@ -253,6 +259,7 @@ func runPollingPass(ctx context.Context, store *db.Store, parser *gofeed.Parser)
 		return
 	}
 
+	syncedCount := 0
 	for _, p := range podcasts {
 		select {
 		case <-ctx.Done():
@@ -288,14 +295,38 @@ func runPollingPass(ctx context.Context, store *db.Store, parser *gofeed.Parser)
 		hosts := extractHosts(feed)
 		cleanDescription := stripHTMLTags(feed.Description)
 
-		err = store.SyncPodcastMetadata(ctx, p.ID, guid, feed.Title, cleanDescription, hosts, remoteUpdateTime)
+		updated, err := store.SyncPodcastMetadata(ctx, p.ID, guid, feed.Title, cleanDescription, hosts, remoteUpdateTime)
 		if err != nil {
 			log.Printf("[Poller] Failed to sync metadata for ID %s: %v", p.ID, err)
 			continue
 		}
 
-		log.Printf("[Poller] Synced metadata and source_system_updated_at for '%s'", p.Title)
+		if updated {
+			log.Printf("[Poller] Synced new metadata and source_system_updated_at for '%s'", p.Title)
+			syncedCount++
+		}
 	}
 
 	log.Println("[Poller] Change-detection polling cycle complete.")
+
+	if syncedCount > 0 {
+		sendIngestionTrigger(ctx, os.Getenv("POSTGRES_URL"), "delta")
+	}
+}
+
+func sendIngestionTrigger(ctx context.Context, dbURL, mode string) {
+	conn, err := pgx.Connect(ctx, dbURL)
+	if err != nil {
+		log.Printf("[Trigger] Failed to connect to DB for notification: %v", err)
+		return
+	}
+	defer conn.Close(ctx)
+
+	payload := fmt.Sprintf(`{"load_mode": "%s"}`, mode)
+	_, err = conn.Exec(ctx, "SELECT pg_notify('ingestion_trigger', $1)", payload)
+	if err != nil {
+		log.Printf("[Trigger] Failed to send ingestion notification: %v", err)
+	} else {
+		log.Printf("[Trigger] Successfully sent pg_notify to ingestion worker (mode: %s)", mode)
+	}
 }

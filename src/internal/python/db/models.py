@@ -80,7 +80,6 @@ class Episode(BaseModel):
     published_at: Optional[datetime] = None
     duration_seconds: Optional[int] = None
     audio_key: str
-    xml_key: Optional[str] = None
     transcript_key: Optional[str] = None
     cover_key: Optional[str] = None
     ingested_at: datetime
