@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Set
 
+SRC_DIR = str(Path(__file__).resolve()).split("src")[0] + "src\\02_processing"
+if str(SRC_DIR) not in sys.path:
+    sys.path.append(str(SRC_DIR))
 from common.app_logger import AppLogger
 from common.db_connector import DbConnector
 
@@ -216,6 +220,46 @@ def fetch_stage_watermark(conn, stage: str) -> Optional[datetime]:
         cur.execute(sql, (stage,))
         row = cur.fetchone()
     return row[0] if row else None
+
+
+
+# When segmenting is successful, then ingestion and transcription is also done
+PREPROCESSING_STAGES = ("segmenting",)
+PREPROCESSING_STATUSES = ("success", "consumed")
+PROCESSING_STAGES = ("text_summarizer", "fact_checker", "embedder", "emotion_scoring")
+PROCESSING_STATUSES = ("success",)
+
+
+def fetch_latest_batch_start_ts(conn, stages: tuple, statuses: tuple) -> Optional[datetime]:
+    sql = """
+        SELECT MAX(start_ts)
+        FROM pipeline_batches
+        WHERE stage::text = ANY(%s) AND status::text = ANY(%s)
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, (list(stages), list(statuses)))
+        row = cur.fetchone()
+    return row[0] if row else None
+
+
+def has_new_preprocessed_data(conn, logger: Optional[logging.Logger] = None) -> bool:
+    """True if segmenting started more recently than the last successful processing
+    run (text_summarizer/fact_checker/embedder/emotion_scoring).
+    """
+    last_preprocessing_ts = fetch_latest_batch_start_ts(conn, PREPROCESSING_STAGES, PREPROCESSING_STATUSES)
+    last_processing_ts = fetch_latest_batch_start_ts(conn, PROCESSING_STAGES, PROCESSING_STATUSES)
+
+    if last_preprocessing_ts is None:
+        is_due = False
+    else:
+        is_due = last_processing_ts is None or last_processing_ts < last_preprocessing_ts
+
+    if logger is not None:
+        logger.info(
+            "poll: last_preprocessing_start_ts=%s last_processing_start_ts=%s due=%s",
+            last_preprocessing_ts, last_processing_ts, is_due,
+        )
+    return is_due
 
 
 def fetch_db_now(conn) -> datetime:

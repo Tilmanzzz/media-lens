@@ -4,6 +4,8 @@
   "max_workers": 3,
   "dry_run": false,
   "steps": "text_summarizer,fact_checker,embedder,emotion_scoring",
+  "poll": true,
+  "poll_interval": 10,
   "testing": false,
   "test_episode_id": null,
   "test_chapter_limit": null,

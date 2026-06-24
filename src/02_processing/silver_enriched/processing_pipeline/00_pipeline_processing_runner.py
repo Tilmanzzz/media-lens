@@ -3,7 +3,10 @@ from __future__ import annotations
 import argparse
 import copy
 import importlib.util
+import os
+import signal
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from pathlib import Path
@@ -15,11 +18,31 @@ if str(SRC_DIR) not in sys.path:
 from common.app_logger import child_logger
 from common.db_connector import DbConnector
 from silver_enriched.processing_pipeline.pipeline_utils import (
-    LoadContext, build_pipeline_logger, fetch_db_now, load_json_config)
+    LoadContext, build_pipeline_logger, fetch_db_now,
+    has_new_preprocessed_data, load_json_config)
 
 # Steps that touch disjoint source/target tables and can run concurrently.
 # embedder is intentionally excluded: it depends on text_summarizer's output.
 PARALLEL_STEPS = ("text_summarizer", "fact_checker", "emotion_scoring")
+
+# Set by the SIGINT/SIGTERM handler so a sleeping poll loop wakes up and exits
+# immediately instead of waiting out the rest of the interval.
+_shutdown_event = threading.Event()
+_shutdown_requests = 0
+
+
+def _request_shutdown(signum, frame) -> None:
+    global _shutdown_requests
+    _shutdown_requests += 1
+    if _shutdown_requests >= 2:
+        print("pipeline: second interrupt received, forcing immediate exit", file=sys.stderr)
+        os._exit(1)
+    print(
+        "pipeline: shutdown requested, finishing the current run (if any) then "
+        "stopping - press Ctrl+C again to force-quit immediately",
+        file=sys.stderr,
+    )
+    _shutdown_event.set()
 
 
 def parse_args() -> argparse.Namespace:
@@ -47,6 +70,19 @@ def parse_args() -> argparse.Namespace:
         "--steps",
         default="text_summarizer,fact_checker,embedder,emotion_scoring",
         help="Comma-separated steps to run, or 'processing' for all steps",
+    )
+    parser.add_argument(
+        "--poll",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Keep running and self-trigger a pipeline run whenever segmenting "
+             "started more recently than the last successful processing run",
+    )
+    parser.add_argument(
+        "--poll-interval",
+        type=int,
+        default=60,
+        help="Seconds to wait between polls when --poll is set",
     )
     parser.add_argument("--testing", action="store_true", help="Enable test run parameters")
     parser.add_argument("--test-episode-id", type=str, default=None, help="Test run: episode id")
@@ -83,20 +119,14 @@ def load_step_module(step_path: Path):
     return module
 
 
-def main() -> None:
-    args = parse_args()
-    steps = [step.strip() for step in args.steps.split(",") if step.strip()]
-
-    if args.log_dir and not Path(args.log_dir).is_absolute():
-        args.log_dir = str((Path(__file__).resolve().parent / args.log_dir).resolve())
-
-    logger = build_pipeline_logger(
-        module_name="processing_pipeline_runner",
-        enabled=args.log_enabled,
-        level=args.log_level,
-        log_dir=args.log_dir,
-        log_file=args.log_file,
-    )
+def run_pipeline(
+    args: argparse.Namespace,
+    steps: list,
+    modules: dict,
+    connector: DbConnector,
+    logger,
+) -> None:
+    """Run one full pass over `steps` (parallel group + embedder dependency)."""
     logger.info(
         "pipeline: start mode=%s dry_run=%s steps=%s batch_id=%s workers=%s",
         args.mode,
@@ -106,7 +136,6 @@ def main() -> None:
         args.max_workers or "-",
     )
 
-    connector = DbConnector()
     with connector.get_connection(logger=logger) as conn:
         new_processing_update_ts = fetch_db_now(conn)
 
@@ -117,28 +146,6 @@ def main() -> None:
         logger=logger,
         dry_run=args.dry_run,
     )
-
-    base_dir = Path(__file__).resolve().parent
-    step_map = {
-        "text_summarizer": base_dir / "01_pipeline_text_summarizer.py",
-        "fact_checker": base_dir / "02_pipeline_fact_checker.py",
-        "embedder": base_dir / "03_pipeline_embedder.py",
-        "emotion_scoring": base_dir / "04_pipeline_emotion_scoring.py",
-    }
-
-    if "processing" in steps:
-        steps = list(step_map.keys())
-
-
-    modules = {}
-    for step in steps:
-        step_path = step_map.get(step)
-        if step_path is None:
-            raise ValueError(f"Unknown step: {step}")
-        module = load_step_module(step_path)
-        if not hasattr(module, "run_step"):
-            raise RuntimeError(f"Step module missing run_step: {step_path}")
-        modules[step] = module
 
     def run_one(step: str) -> None:
         step_args = copy.copy(args)
@@ -186,6 +193,69 @@ def main() -> None:
         raise errors[0][1]
 
     logger.info("pipeline: done")
+
+
+def main() -> None:
+    args = parse_args()
+    steps = [step.strip() for step in args.steps.split(",") if step.strip()]
+
+    if args.log_dir and not Path(args.log_dir).is_absolute():
+        args.log_dir = str((Path(__file__).resolve().parent / args.log_dir).resolve())
+
+    logger = build_pipeline_logger(
+        module_name="processing_pipeline_runner",
+        enabled=args.log_enabled,
+        level=args.log_level,
+        log_dir=args.log_dir,
+        log_file=args.log_file,
+    )
+
+    base_dir = Path(__file__).resolve().parent
+    step_map = {
+        "text_summarizer": base_dir / "01_pipeline_text_summarizer.py",
+        "fact_checker": base_dir / "02_pipeline_fact_checker.py",
+        "embedder": base_dir / "03_pipeline_embedder.py",
+        "emotion_scoring": base_dir / "04_pipeline_emotion_scoring.py",
+    }
+
+    if "processing" in steps:
+        steps = list(step_map.keys())
+
+    modules = {}
+    for step in steps:
+        step_path = step_map.get(step)
+        if step_path is None:
+            raise ValueError(f"Unknown step: {step}")
+        module = load_step_module(step_path)
+        if not hasattr(module, "run_step"):
+            raise RuntimeError(f"Step module missing run_step: {step_path}")
+        modules[step] = module
+
+    connector = DbConnector()
+
+    if not args.poll:
+        run_pipeline(args, steps, modules, connector, logger)
+        return
+
+    signal.signal(signal.SIGINT, _request_shutdown)
+    signal.signal(signal.SIGTERM, _request_shutdown)
+    logger.info("pipeline: poll mode enabled interval=%ss", args.poll_interval)
+
+    while not _shutdown_event.is_set():
+        with connector.get_connection(logger=logger) as conn:
+            due = has_new_preprocessed_data(conn, logger=logger)
+
+        if due:
+            try:
+                run_pipeline(args, steps, modules, connector, logger)
+            except Exception:
+                logger.exception("pipeline: poll-triggered run failed")
+        else:
+            logger.info("poll: no new preprocessed data, sleeping %ss", args.poll_interval)
+
+        _shutdown_event.wait(args.poll_interval)
+
+    logger.info("pipeline: poll loop stopped")
 
 
 if __name__ == "__main__":

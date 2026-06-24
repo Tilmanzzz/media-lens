@@ -16,7 +16,8 @@ if str(SRC_DIR) not in sys.path:
 from common.app_logger import AppLogger
 from common.db_connector import DbConnector
 from minio.error import S3Error
-from silver_enriched.emotion_analyser.emotion_analyser import EmotionAnalyser
+from silver_enriched.emotion_analyser.emotion_analyser import (
+    EmotionAnalyser, RemoteEmotionEndpointUnavailable)
 from silver_enriched.emotion_analyser.minio_utils import (
     download_object_to_path, init_minio_client)
 from silver_enriched.processing_pipeline.pipeline_utils import (
@@ -277,6 +278,16 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
                         )
                         skipped += 1
                         continue
+                    except RemoteEmotionEndpointUnavailable:
+                        # Endpoint is down, not just this one line - every remaining
+                        # line would fail the same way. Abort instead of grinding
+                        # through the rest one timeout at a time; pipeline_batch_scope
+                        # marks the batch 'failed' and rolls back.
+                        logger.error(
+                            "emotion_scoring: aborting, remote endpoint unreachable (line_id=%s episode_id=%s)",
+                            line_id, episode_id,
+                        )
+                        raise
                     except Exception as exc:
                         logger.exception(
                             "emotion_scoring: failed line_id=%s episode_id=%s: %s",
