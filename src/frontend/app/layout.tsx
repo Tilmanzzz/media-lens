@@ -23,7 +23,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full antialiased">
+    <html lang="en" className="antialiased">
       <body
         className={`${courierPrime.className} ${dmSans.className} min-h-screen bg-background text-foreground`}
       >
