@@ -47,7 +47,7 @@ services:
   sectioning:
     build:
       context: ./src
-      dockerfile: ./02_processing/sectioning/Dockerfile
+      dockerfile: ./02_processing/silver_enriched/Dockerfile
     depends_on:
       minio:
         condition: service_healthy
@@ -62,7 +62,7 @@ services:
       - POSTGRES_URL=${POSTGRES_URL}
       - LOG_DIR=${LOG_DIR}
     volumes:
-      - ./logs/sectioning:/app/logs
+      - ./logs/silver_enriched:/app/logs
     deploy:
       resources:
         reservations:
@@ -142,6 +142,29 @@ services:
       - MINIO_USER=${MINIO_USER}
       - MINIO_PASS=${MINIO_PASS}
       - POSTGRES_URL=${POSTGRES_URL}
+
+  processing:
+    build:
+      context: ./src
+      dockerfile: ./02_processing/silver_enriched/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      sectioning:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_URL=${POSTGRES_URL}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+    volumes:
+      - ./logs/processing:/app/logs
+    # Force the orchestrator into continuous polling mode
+    command: ["--poll", "--poll-interval", "60", "--log-enabled"]
 
   backend:
     build: ./src/backend
