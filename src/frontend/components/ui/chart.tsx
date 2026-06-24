@@ -19,10 +19,12 @@ interface EmotionChartProps {
 
 const EMOTION_COLORS: Record<string, string> = {
   angry:   "#E24B4A",
-  happy:   "#9FE1CB",
+  happy:   "#dcd354",
   neutral: "#888780",
-  sad:     "#B4B2A9",
+  sad:     "#9076cc",
 };
+
+const ALL_EMOTIONS = ["angry", "happy", "neutral", "sad"];
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -45,11 +47,6 @@ export default function EmotionChart({ data }: EmotionChartProps) {
 
   const segments = data.segments;
   const totalDuration = segments.at(-1)?.end ?? 1;
-
-  // Alle einzigartigen Emotionen für die Legende
-  const uniqueEmotions = Array.from(
-    new Set(segments.map((s) => s.dominant))
-  );
 
   // Datenpunkte: Mitte jedes Segments
   const points = segments.map((seg) => ({
@@ -77,11 +74,17 @@ export default function EmotionChart({ data }: EmotionChartProps) {
     const PAD_T = 16;
     const PAD_B = 28;
 
+    // Theme-Farben aus CSS-Variablen lesen
+    const computedStyle = getComputedStyle(document.documentElement);
+    const textSecondary = computedStyle.getPropertyValue("--color-text-secondary").trim() || "rgba(128,128,128,0.6)";
+    const borderColor = computedStyle.getPropertyValue("--color-border-tertiary").trim() || "rgba(128,128,128,0.15)";
+    const textPrimary = computedStyle.getPropertyValue("--color-text-primary").trim() || "#000";
+
     const toX = (t: number) => PAD_L + (t / totalDuration) * (W - PAD_L - PAD_R);
     const toY = (v: number) => PAD_T + ((100 - v) / 100) * (H - PAD_T - PAD_B);
 
     // Hintergrundlinien
-    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.strokeStyle = borderColor;
     ctx.lineWidth = 0.5;
     for (let i = 0; i <= 4; i++) {
       const y = PAD_T + (i / 4) * (H - PAD_T - PAD_B);
@@ -93,7 +96,7 @@ export default function EmotionChart({ data }: EmotionChartProps) {
 
     // Linie zwischen Punkten
     ctx.beginPath();
-    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.strokeStyle = textPrimary;
     ctx.lineWidth = 2;
     ctx.lineJoin = "round";
     points.forEach((pt, i) => {
@@ -105,7 +108,7 @@ export default function EmotionChart({ data }: EmotionChartProps) {
     ctx.stroke();
 
     // Zeitlabels auf X-Achse (nur bei bestimmten Segmenten)
-    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.fillStyle = textSecondary;
     ctx.font = "11px sans-serif";
     ctx.textAlign = "center";
     points.forEach((pt, i) => {
@@ -125,10 +128,10 @@ export default function EmotionChart({ data }: EmotionChartProps) {
       ctx.fillStyle = color;
       ctx.fill();
 
-      // weißer Ring
+      // Ring
       ctx.beginPath();
       ctx.arc(x, y, 7, 0, Math.PI * 2);
-      ctx.strokeStyle = "rgba(255,255,255,0.3)";
+      ctx.strokeStyle = borderColor;
       ctx.lineWidth = 1.5;
       ctx.stroke();
     });
@@ -172,22 +175,22 @@ export default function EmotionChart({ data }: EmotionChartProps) {
   };
 
   return (
-    <div className="w-full rounded-xl p-5" style={{ background: "#1a2035" }}>
+    <div className="w-full rounded-xl p-5">
       {/* Titel */}
       <p className="text-sm font-medium mb-4">
         Emotion Verlauf
       </p>
 
       <div className="flex gap-4">
-        {/* Legende links */}
+        {/* Legende links – immer alle 4 Emotionen */}
         <div className="flex flex-col gap-2 justify-around shrink-0">
-          {uniqueEmotions.map((em) => (
+          {ALL_EMOTIONS.map((em) => (
             <div key={em} className="flex items-center gap-2">
               <div
                 className="rounded-sm shrink-0"
                 style={{ width: 22, height: 14, background: getColor(em) }}
               />
-              <span className="text-xs" style={{ color: "rgba(255,255,255,0.45)", whiteSpace: "nowrap" }}>
+              <span className="text-xs text-foreground-subtle" style={{ whiteSpace: "nowrap" }}>
                 {em}
               </span>
             </div>
@@ -208,13 +211,10 @@ export default function EmotionChart({ data }: EmotionChartProps) {
           {/* Tooltip */}
           {tooltip && (
             <div
-              className="absolute pointer-events-none rounded-lg px-3 py-2 text-xs"
+              className="absolute pointer-events-none rounded-lg px-3 py-2 text-xs bg-background-raised border border-border text-foreground"
               style={{
                 left: tooltip.x - 60,
                 top: tooltip.y - 76,
-                background: "rgba(20,28,50,0.95)",
-                border: "0.5px solid rgba(255,255,255,0.15)",
-                color: "rgba(255,255,255,0.9)",
                 minWidth: 120,
               }}
             >
@@ -225,10 +225,10 @@ export default function EmotionChart({ data }: EmotionChartProps) {
                 />
                 <span className="font-medium">{tooltip.segment.dominant}</span>
               </div>
-              <div style={{ color: "rgba(255,255,255,0.5)" }}>
+              <div className="text-foreground-subtle">
                 {formatTime(tooltip.segment.start)} – {formatTime(tooltip.segment.end)}
               </div>
-              <div style={{ color: "rgba(255,255,255,0.5)" }}>
+              <div className="text-foreground-subtle">
                 Score: {Math.round(tooltip.segment.score * 100)}%
               </div>
             </div>
@@ -250,5 +250,3 @@ export default function EmotionChart({ data }: EmotionChartProps) {
     </div>
   );
 }
-
-
