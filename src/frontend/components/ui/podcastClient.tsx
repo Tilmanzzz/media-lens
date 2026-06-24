@@ -17,10 +17,10 @@ interface PanelConfig {
 }
 
 const PANEL_LABELS: Record<keyof PanelConfig, string> = {
-  transcript:   "Transkript",
-  emotionChart: "Emotionsverlauf",
-  themen:       "Themen",
-  faktencheck:  "Faktencheck",
+  transcript:   "Transcript",
+  emotionChart: "Emotionstrack",
+  themen:       "Chapters",
+  faktencheck:  "Factcheck",
   chat:         "KI-Chat",
 };
 
@@ -52,44 +52,42 @@ export default function PodcastDetailClient({
   };
 
   return (
-    <div className="flex flex-row gap-6 w-full bg-background-raised mt-6 px-4 py-6">
+    <div className="flex flex-col w-full bg-background-raised mt-6 px-4 py-6 gap-6">
+      <div className="flex flex-row gap-6 items-start flex-wrap">
+        <div className="flex-1 min-w-0">
+          <PodcastPlayer
+            src={src}
+            chapters={chapters}
+            showTranscript={panels.transcript}
+            showThemen={panels.themen}
+            showFaktencheck={panels.faktencheck}
+          >
+            {panels.emotionChart && <EmotionChart data={emotionData} />}
+          </PodcastPlayer>
+        </div>
 
-      {/* Hauptinhalt */}
-      <div className="flex-1 flex flex-col gap-6">
-        <PodcastPlayer
-          src={src}
-          chapters={chapters}
-          showTranscript={panels.transcript}
-          showThemen={panels.themen}
-          showFaktencheck={panels.faktencheck}
-        >
-          {panels.emotionChart && <EmotionChart data={emotionData} />}
-        </PodcastPlayer>
-
-        {panels.chat && <Chat episodeId={episodeId} />}
-      </div>
-
-      {/* Konfigurations-Panel */}
-      <div className="w-64 shrink-0">
-        <p className="text-sm font-medium text-foreground mb-4">Ansicht anpassen</p>
-        <div className="flex flex-col gap-2">
-          {(Object.keys(panels) as (keyof PanelConfig)[]).map((key) => (
-            <button
-              key={key}
-              onClick={() => toggle(key)}
-              className={`flex items-center justify-between w-full px-3 py-2.5 rounded-lg border text-sm transition-all cursor-pointer
-                ${panels[key]
-                  ? "bg-primary-muted border-primary text-foreground"
-                  : "bg-background-card border-border text-foreground-subtle hover:bg-background-raised"
-                }`}
-            >
-              <span>{PANEL_LABELS[key]}</span>
-              <span className={`w-4 h-4 rounded-full border-2 transition-colors ${panels[key] ? "bg-primary border-primary" : "border-foreground-subtle"}`} />
-            </button>
-          ))}
+        <div className="w-full max-w-[320px] shrink-0">
+          <p className="text-lg font-medium text-foreground-subtle mb-4">Configuration</p>
+          <div className="flex flex-col gap-2">
+            {(Object.keys(panels) as (keyof PanelConfig)[]).map((key) => (
+              <button
+                key={key}
+                onClick={() => toggle(key)}
+                className={`flex items-center justify-between w-full px-3 py-2.5 rounded-lg border text-sm transition-all cursor-pointer
+                  ${panels[key]
+                    ? "bg-primary-muted border-primary text-foreground"
+                    : "bg-background-card border-border text-foreground-subtle hover:bg-background-raised"
+                  }`}
+              >
+                <span>{PANEL_LABELS[key]}</span>
+                <span className={`w-4 h-4 rounded-full border-2 transition-colors ${panels[key] ? "bg-primary border-primary" : "border-foreground-subtle"}`} />
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
+      {panels.chat && <Chat episodeId={episodeId} />}
     </div>
   );
 }

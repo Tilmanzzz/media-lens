@@ -178,8 +178,8 @@ export default function EmotionChart({ data }: EmotionChartProps) {
   return (
     <div className="w-full rounded-xl p-5" style={{ background: "#1a2035" }}>
       {/* Titel */}
-      <p className="text-sm font-medium mb-4">
-        Emotion Verlauf
+      <p className="text-lg font-medium mb-4">
+        Emotionchart
       </p>
 
       <div className="flex gap-4">

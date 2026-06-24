@@ -35,7 +35,7 @@ export function SearchBar({ placeholder = "Suche..." }: SearchBarProps) {
       />
       <input
         type="search"
-        defaultValue={searchParams.get("q") ?? ""}
+        value={searchParams.get("q") ?? ""}
         onChange={(e) => handleChange(e.target.value)}
         placeholder={placeholder}
         className="w-full rounded-2xl border border-border bg-background-card py-3 pl-10 pr-4 text-sm text-foreground outline-none transition placeholder:text-foreground-subtle focus:border-border-strong focus:bg-background-raised"
