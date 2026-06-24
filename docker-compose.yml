@@ -145,15 +145,13 @@ services:
 
   processing:
     build:
-      context: ./src
+      context: ./src/
       dockerfile: ./02_processing/silver_enriched/Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
       minio:
         condition: service_healthy
-      sectioning:
-        condition: service_started
     env_file:
       - .env
     environment:
@@ -162,8 +160,7 @@ services:
       - MINIO_USER=${MINIO_USER}
       - MINIO_PASS=${MINIO_PASS}
     volumes:
-      - ./logs/processing:/app/logs
-    # Force the orchestrator into continuous polling mode
+      - ./logs/processing:/app/src/02_processing/logs
     command: ["--poll", "--poll-interval", "60", "--log-enabled"]
 
   backend:

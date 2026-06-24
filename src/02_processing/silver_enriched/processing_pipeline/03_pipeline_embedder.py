@@ -2,42 +2,73 @@ from __future__ import annotations
 
 import argparse
 import sys
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set
 
-SRC_DIR = str(Path(__file__).resolve()).split("src")[0] + "src\\02_processing"
-if str(SRC_DIR) not in sys.path:
-    sys.path.append(str(SRC_DIR))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
+# SRC_DIR = os.path.join(
+#     str(Path(__file__).resolve()).split("src")[0], "src", "02_processing"
+# )
+# if str(SRC_DIR) not in sys.path:
+#     sys.path.append(str(SRC_DIR))
 
 from common.app_logger import AppLogger
 from common.db_connector import DbConnector
 from silver_enriched.processing_pipeline.pipeline_utils import (
-    LoadContext, build_pipeline_logger, fetch_chapter_ids_for_episode,
-    fetch_chunks, fetch_db_now, load_json_config, pipeline_batch_scope)
-from silver_enriched.transcript_embedder.transcript_embedder_core import \
-    TranscriptEmbedder
+    LoadContext,
+    build_pipeline_logger,
+    fetch_chapter_ids_for_episode,
+    fetch_chunks,
+    fetch_db_now,
+    load_json_config,
+    pipeline_batch_scope,
+)
+from silver_enriched.transcript_embedder.transcript_embedder_core import (
+    TranscriptEmbedder,
+)
 
 
 def parse_args() -> argparse.Namespace:
     pre_parser = argparse.ArgumentParser(add_help=False)
-    pre_parser.add_argument("--config", default=None, help="Path to pipeline args JSON config")
+    pre_parser.add_argument(
+        "--config", default=None, help="Path to pipeline args JSON config"
+    )
     pre_args, remaining = pre_parser.parse_known_args()
 
-    parser = argparse.ArgumentParser(description="Run embedder against podcast, episode, and chapter inputs.")
-    parser.add_argument("--config", default="processing_pipeline_config.json", help="Path to pipeline args JSON config")
+    parser = argparse.ArgumentParser(
+        description="Run embedder against podcast, episode, and chapter inputs."
+    )
+    parser.add_argument(
+        "--config",
+        default="processing_pipeline_config.json",
+        help="Path to pipeline args JSON config",
+    )
     parser.add_argument("--mode", choices=["full", "delta"], default="delta")
-    parser.add_argument("--stage", default="embedder", help="pipeline_batches.stage tag (documentation only)")
-    parser.add_argument("--batch-id", default=None, help="Batch UUID to store on writes")
+    parser.add_argument(
+        "--stage",
+        default="embedder",
+        help="pipeline_batches.stage tag (documentation only)",
+    )
+    parser.add_argument(
+        "--batch-id", default=None, help="Batch UUID to store on writes"
+    )
     parser.add_argument(
         "--dry-run",
         action=argparse.BooleanOptionalAction,
         default=False,
         help="Run without database writes",
     )
-    parser.add_argument("--testing", action="store_true", help="Enable test run parameters")
-    parser.add_argument("--test-episode-id", type=str, default=None, help="Test run: episode id")
-    parser.add_argument("--test-chapter-limit", type=int, default=3, help="Test run: max chapters")
+    parser.add_argument(
+        "--testing", action="store_true", help="Enable test run parameters"
+    )
+    parser.add_argument(
+        "--test-episode-id", type=str, default=None, help="Test run: episode id"
+    )
+    parser.add_argument(
+        "--test-chapter-limit", type=int, default=3, help="Test run: max chapters"
+    )
     parser.add_argument(
         "--test-end-watermark",
         default=None,
@@ -50,10 +81,17 @@ def parse_args() -> argparse.Namespace:
         help="Enable pipeline logging",
     )
     parser.add_argument("--log-level", default="INFO", help="Pipeline logger level")
-    parser.add_argument("--log-dir", default=None, help="Optional pipeline log directory")
-    parser.add_argument("--log-file", default="embedder_pipeline.log", help="Pipeline log file name")
+    parser.add_argument(
+        "--log-dir", default=None, help="Optional pipeline log directory"
+    )
+    parser.add_argument(
+        "--log-file", default="embedder_pipeline.log", help="Pipeline log file name"
+    )
 
-    config = load_json_config(pre_args.config or parser.get_default("config"), base_dir=Path(__file__).resolve().parent)
+    config = load_json_config(
+        pre_args.config or parser.get_default("config"),
+        base_dir=Path(__file__).resolve().parent,
+    )
     if config:
         parser.set_defaults(**config)
 
@@ -68,33 +106,41 @@ def _fetch_podcast_id_for_episode(conn, episode_id: str) -> Optional[str]:
     return str(row[0]) if row and row[0] is not None else None
 
 
-def _build_input_chunks(level: str, chunks: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _build_input_chunks(
+    level: str, chunks: Iterable[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
     inputs: List[Dict[str, Any]] = []
     for chunk in chunks:
         if level == "podcast":
             text = str(chunk.get("podcast_title") or "").strip()
             if not text:
                 continue
-            inputs.append({
-                "podcast_id": chunk.get("podcast_id"),
-                "transcription": text,
-            })
+            inputs.append(
+                {
+                    "podcast_id": chunk.get("podcast_id"),
+                    "transcription": text,
+                }
+            )
         elif level == "episode":
             text = str(chunk.get("episode_summary") or "").strip()
             if not text:
                 continue
-            inputs.append({
-                "episode_id": chunk.get("episode_id"),
-                "transcription": text,
-            })
+            inputs.append(
+                {
+                    "episode_id": chunk.get("episode_id"),
+                    "transcription": text,
+                }
+            )
         else:
             text = str(chunk.get("transcript_text") or "").strip()
             if not text:
                 continue
-            inputs.append({
-                "chapter_id": chunk.get("chapter_id"),
-                "transcription": text,
-            })
+            inputs.append(
+                {
+                    "chapter_id": chunk.get("chapter_id"),
+                    "transcription": text,
+                }
+            )
     return inputs
 
 
@@ -113,15 +159,17 @@ def _build_embedding_rows(
         if not embedding:
             continue
 
-        rows.append({
-            "chapter_id": record.get("chapter_id") if level == "chapter" else None,
-            "episode_id": record.get("episode_id") if level == "episode" else None,
-            "podcast_id": record.get("podcast_id") if level == "podcast" else None,
-            "level": level,
-            "embedding": str(embedding),
-            "batch_id": batch_id,
-            "processing_updated_at": processing_update_ts,
-        })
+        rows.append(
+            {
+                "chapter_id": record.get("chapter_id") if level == "chapter" else None,
+                "episode_id": record.get("episode_id") if level == "episode" else None,
+                "podcast_id": record.get("podcast_id") if level == "podcast" else None,
+                "level": level,
+                "embedding": str(embedding),
+                "batch_id": batch_id,
+                "processing_updated_at": processing_update_ts,
+            }
+        )
 
     return rows
 
@@ -163,7 +211,9 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
     )
 
     dry_run = args.dry_run or ctx.dry_run
-    with pipeline_batch_scope(conn, args.stage, ctx.mode, args.batch_id, dry_run, logger=logger) as batch_id:
+    with pipeline_batch_scope(
+        conn, args.stage, ctx.mode, args.batch_id, dry_run, logger=logger
+    ) as batch_id:
         end_ts = None
         if args.testing and args.test_end_watermark:
             end_ts = ctx.connector.parse_ts(args.test_end_watermark)
@@ -182,14 +232,19 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
                 )
             )
             if not chapter_ids:
-                logger.warning("embedder: no chapters found for test episode_id=%s", args.test_episode_id)
+                logger.warning(
+                    "embedder: no chapters found for test episode_id=%s",
+                    args.test_episode_id,
+                )
                 chapter_ids = None
 
             podcast_id = _fetch_podcast_id_for_episode(conn, str(args.test_episode_id))
             if podcast_id:
                 podcast_ids = {podcast_id}
 
-        embedder = TranscriptEmbedder(logging_enabled=args.log_enabled, log_level=args.log_level)
+        embedder = TranscriptEmbedder(
+            logging_enabled=args.log_enabled, log_level=args.log_level
+        )
         embedder.logger = logger
 
         logger.info("embedder: start mode=%s", ctx.mode)
@@ -232,14 +287,18 @@ def run_step(conn, ctx: LoadContext, args: argparse.Namespace) -> None:
                 logger.info("embedder: dry run, skipping writes level=%s", level)
                 continue
 
-            rows = _build_embedding_rows(level, embedded, batch_id, ctx.processing_update_ts)
+            rows = _build_embedding_rows(
+                level, embedded, batch_id, ctx.processing_update_ts
+            )
             total_updates += _insert_embeddings(conn, rows)
 
         if dry_run:
             return
 
         conn.commit()
-        logger.info("embedder: done rows=%d batch_id=%s", total_updates, batch_id or "-")
+        logger.info(
+            "embedder: done rows=%d batch_id=%s", total_updates, batch_id or "-"
+        )
 
 
 def main() -> None:
