@@ -49,7 +49,7 @@ func (h *Handler) Chat(c *gin.Context) {
 		sb.WriteByte('\n')
 	}
 
-	answer, err := h.LLM.Ask(c.Request.Context(), sb.String(), req.Question)
+	answer, err := h.LLM.Chat(c.Request.Context(), sb.String(), req.History, req.Question)
 	if err != nil {
 		respondError(c, http.StatusServiceUnavailable, "LLM_UNAVAILABLE", "LLM-Service ist nicht verfügbar.")
 		return

@@ -31,6 +31,7 @@ export default function RagChat({
     const query = input.trim();
     if (!query || isLoading) return;
 
+    const history = messages.map(({ role, content }) => ({ role, content }));
     setMessages((prev) => [...prev, { role: "user", content: query }]);
     setInput("");
     setIsLoading(true);
@@ -40,7 +41,7 @@ export default function RagChat({
       const res = await fetch(`${backendUrl}/api/v1/episodes/${episodeId}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: query }),
+        body: JSON.stringify({ question: query, history }),
       });
 
       if (!res.ok) throw new Error(`Backend error ${res.status}`);
