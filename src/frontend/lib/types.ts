@@ -10,7 +10,9 @@ export interface EpisodeCard {
   duration_seconds: number;
 }
 
-export interface EpisodeDetail extends EpisodeCard {}
+export interface EpisodeDetail extends EpisodeCard {
+  audio_url?: string;
+}
 
 export interface TranscriptLine {
   id: string;

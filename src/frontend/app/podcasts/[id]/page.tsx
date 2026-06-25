@@ -109,7 +109,7 @@ export default async function PodcastDetail({ params }: { params: Promise<{ id: 
       </div>
 
       <PodcastDetailClient
-        src="/sample-3s.mp3"
+        src={episode.audio_url ?? "/sample-3s.mp3"}
         episodeId={episode.id}
         chapters={chapters}
         emotionData={emotionData}

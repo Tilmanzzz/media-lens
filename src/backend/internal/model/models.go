@@ -44,6 +44,7 @@ type EpisodeDetail struct {
 	DurationSeconds    int    `json:"duration_seconds"`
 	PublishedAt        string `json:"published_at"`
 	CoverURL           string `json:"cover_url"`
+	AudioURL           string `json:"audio_url,omitempty"`
 	Summary            string `json:"summary"`
 	ProcessingComplete bool   `json:"processing_complete"`
 }
