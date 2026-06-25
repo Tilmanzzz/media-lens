@@ -7,8 +7,10 @@ ENV UV_COMPILE_BYTECODE=1
 ENV UV_PYTHON=python3.13
 
 COPY pyproject.toml uv.lock ./
+COPY 02_processing/transcription/pyproject.toml 02_processing/transcription/pyproject.toml
+COPY 02_processing/silver_enriched/pyproject.toml 02_processing/silver_enriched/pyproject.toml
 RUN --mount=type=cache,target=/root/.cache/uv \
-	uv sync --frozen --no-install-project --no-dev
+	uv sync --frozen --no-install-project --no-dev --package preprocessing
 
 FROM python:3.13-slim AS runtime
 ENV DEBIAN_FRONTEND=noninteractive

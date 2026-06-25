@@ -1,23 +1,5 @@
-[project]
-name = "src"
-version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-requires-python = ">=3.12"
-dependencies = [
-    "psycopg[pool]>=3.1.0",
-    "psycopg-pool>=3.3.1",
-    "pydantic>=2.0.0",
-    "minio>=7.2.0",
-    "psycopg-binary>=3.3.4",
-    "asyncpg>=0.31.0",
-    "nltk>=3.9.4",
-    "python-dotenv==1.2.2",
-    "langchain-core==1.4.0",
-    "langchain-google-genai==4.2.4",
-    "ddgs==9.12.1",
-    "requests==2.33.1",
-    "librosa==0.11.0",
-    "google-genai>=2.8.0",
-    "aiohttp>=3.14.1",
+[tool.uv.workspace]
+members = [
+    "02_processing/transcription",
+    "02_processing/silver_enriched",
 ]
