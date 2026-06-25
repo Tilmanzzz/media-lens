@@ -15,9 +15,9 @@ function formatDuration(seconds: number): string {
 export default async function SearchPage({
   searchParams,
 }: {
-  searchParams: { q?: string };
+  searchParams: Promise<{ q?: string }>;
 }) {
-  const query = searchParams.q ?? "";
+  const { q: query = "" } = await searchParams;
   
   if (!query) {
     return (
@@ -50,7 +50,7 @@ export default async function SearchPage({
 
       <p className="text-sm text-foreground-subtle mb-6">
         <span className="text-foreground font-medium">{total}</span> Ergebnisse für{" "}
-        <span className="text-foreground font-medium">„{q}"</span>
+        <span className="text-foreground font-medium">„{query}"</span>
       </p>
 
       {episodes.length === 0 ? (
