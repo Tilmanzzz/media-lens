@@ -69,3 +69,24 @@ export interface FactChecksResponse {
   episode_id: string;
   claims: FactCheckedClaim[];
 }
+
+export interface SearchHighlight {
+  text: string;
+  start_time: number;
+  score: number;
+}
+
+export interface SearchResultItem {
+  episode_id: string;
+  title: string;
+  podcast_name: string;
+  cover_url: string;
+  score: number;
+  highlights: SearchHighlight[];
+}
+
+export interface SearchResponse {
+  query: string;
+  items: SearchResultItem[];
+  total: number;
+}
