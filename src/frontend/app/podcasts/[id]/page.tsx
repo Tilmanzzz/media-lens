@@ -4,7 +4,7 @@ import Link from "next/link";
 import type { Chapter, FactVerdict } from "@/lib/types";
 import PodcastDetailClient from "@/components/ui/podcastClient";
 import { InfoCard } from "@/components/ui/card";
-import { fetchEpisode, fetchChapters, fetchTranscript, fetchFactChecks, fetchEpisodes } from "@/lib/api";
+import { fetchEpisode, fetchChapters, fetchTranscript, fetchFactChecks, fetchEpisodes, getPublicBackendUrl } from "@/lib/api";
 
 const knownVerdicts = new Set<string>(["TRUE", "MOSTLY_TRUE", "MISLEADING", "FALSE", "UNVERIFIABLE"]);
 const safeVerdict = (v: string): FactVerdict =>
@@ -109,7 +109,7 @@ export default async function PodcastDetail({ params }: { params: Promise<{ id: 
       </div>
 
       <PodcastDetailClient
-        src="/sample-3s.mp3"
+        src={episode.audio_url ? `${getPublicBackendUrl()}${episode.audio_url}` : "/sample-3s.mp3"}
         episodeId={episode.id}
         chapters={chapters}
         emotionData={emotionData}

@@ -8,6 +8,11 @@ import type {
 
 const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:8080";
 
+/** Public backend URL reachable from the browser (for audio streaming etc.) */
+export function getPublicBackendUrl(): string {
+  return process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8080";
+}
+
 async function backendFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BACKEND_URL}/api/v1${path}`, {
     ...init,
