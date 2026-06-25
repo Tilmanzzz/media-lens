@@ -13,8 +13,9 @@ import (
 
 func NewMinioClient(cfg *config.Config) (*minio.Client, error) {
 	client, err := minio.New(cfg.MinioEndpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(cfg.MinioUser, cfg.MinioPass, ""),
-		Secure: cfg.MinioUseSSL,
+		Creds:        credentials.NewStaticV4(cfg.MinioUser, cfg.MinioPass, ""),
+		Secure:       cfg.MinioUseSSL,
+		BucketLookup: minio.BucketLookupPath,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create minio client: %w", err)

@@ -44,6 +44,63 @@ services:
       timeout: 5s
       retries: 1
 
+  sectioning:
+    build:
+      context: ./src
+      dockerfile: ./02_processing/silver_enriched/Dockerfile
+    depends_on:
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - POSTGRES_URL=${POSTGRES_URL}
+      - LOG_DIR=${LOG_DIR}
+    volumes:
+      - ./logs/silver_enriched:/app/logs
+    # deploy:
+    #   resources:
+    #     reservations:
+          # devices:
+            # - driver: nvidia
+            #   count: all
+            #   capabilities: [gpu]
+
+  transcription:
+    build:
+      context: ./src/
+      dockerfile: ./02_processing/transcription/Dockerfile
+    depends_on:
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      sectioning:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - POSTGRES_URL=${POSTGRES_URL}
+      - USE_CUDA=true
+      - LOG_DIR=${LOG_DIR}
+    volumes:
+      - ./logs/transcription:/app/logs
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+  
   ingestion:
     build:
       context: ./src
@@ -54,6 +111,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      transcription:
+        condition: service_started
     env_file:
       - .env
     environment:
@@ -73,6 +132,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      ingestion:
+        condition: service_started
     env_file:
       - .env
     profiles: ["tools"]
@@ -82,69 +143,25 @@ services:
       - MINIO_PASS=${MINIO_PASS}
       - POSTGRES_URL=${POSTGRES_URL}
 
-  transcription:
+  processing:
     build:
       context: ./src/
-      dockerfile: ./02_processing/transcription/Dockerfile
+      dockerfile: ./02_processing/silver_enriched/Dockerfile
     depends_on:
-      minio:
-        condition: service_healthy
       postgres:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     env_file:
       - .env
     environment:
+      - POSTGRES_URL=${POSTGRES_URL}
       - MINIO_ENDPOINT=${MINIO_ENDPOINT}
       - MINIO_USER=${MINIO_USER}
       - MINIO_PASS=${MINIO_PASS}
-      - POSTGRES_URL=${POSTGRES_URL}
-      - USE_CUDA=true
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
-  sectioning:
-    build:
-      context: ./src
-      dockerfile: ./02_processing/sectioning/Dockerfile
-    depends_on:
-      minio:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    env_file:
-      - .env
-    environment:
-      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
-      - MINIO_USER=${MINIO_USER}
-      - MINIO_PASS=${MINIO_PASS}
-      - POSTGRES_URL=${POSTGRES_URL}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
-  processing_silver:
-    build: ./src/02_processing/silver/
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-    env_file:
-      - .env
-    environment:
-      - MINIO_USER=${MINIO_USER}
-      - MINIO_PASS=${MINIO_PASS}
-      - S3_ENDPOINT=http://minio:9000
-      - POSTGRES_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASS}@postgres:5432/${POSTGRES_DB}
+    volumes:
+      - ./logs/processing:/app/src/02_processing/logs
+    command: ["--poll", "--poll-interval", "60", "--log-enabled"]
 
   backend:
     build: ./src/backend

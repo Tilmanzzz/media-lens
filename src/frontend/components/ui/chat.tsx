@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from "react";
 interface Message {
   role: "user" | "assistant";
   content: string;
+  isError?: boolean;
 }
 
 interface RagChatProps {
@@ -31,6 +32,13 @@ export default function RagChat({
     const query = input.trim();
     if (!query || isLoading) return;
 
+    const history: { role: string; content: string }[] = [];
+    for (let i = 0; i + 1 < messages.length; i += 2) {
+      if (!messages[i + 1].isError) {
+        history.push({ role: messages[i].role, content: messages[i].content });
+        history.push({ role: messages[i + 1].role, content: messages[i + 1].content });
+      }
+    }
     setMessages((prev) => [...prev, { role: "user", content: query }]);
     setInput("");
     setIsLoading(true);
@@ -40,7 +48,7 @@ export default function RagChat({
       const res = await fetch(`${backendUrl}/api/v1/episodes/${episodeId}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: query }),
+        body: JSON.stringify({ question: query, history }),
       });
 
       if (!res.ok) throw new Error(`Backend error ${res.status}`);
@@ -50,7 +58,7 @@ export default function RagChat({
     } catch {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "Error searching for an answer." },
+        { role: "assistant", content: "Error searching for an answer.", isError: true },
       ]);
     } finally {
       setIsLoading(false);

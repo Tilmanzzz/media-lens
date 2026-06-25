@@ -37,21 +37,19 @@ CREATE TABLE podcasts (
   episode_count       INTEGER,
   categories          TEXT[],
   image_url           TEXT,
-  ingested_at         TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  ingested_at         TIMESTAMPTZ, 
   published_at        TIMESTAMPTZ,
   batch_id            UUID        REFERENCES pipeline_batches(id) ON DELETE SET NULL,
   -- lastUpdateTime: The channel-level pubDate for the feed, if it’s sane.
   source_system_updated_at          TIMESTAMPTZ,
-  preprocessing_updated_at TIMESTAMPTZ,
-  ingestion_updated_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   max_episodes        INT DEFAULT NULL,
+  xml_key             TEXT,
   CONSTRAINT ck_podcasts_episode_count CHECK (episode_count IS NULL OR episode_count >= 0),
   CONSTRAINT ck_podcasts_max_episodes CHECK (max_episodes IS NULL OR max_episodes >= 0)
 );
 
 CREATE UNIQUE INDEX uq_podcasts_guid ON podcasts(guid);
-CREATE INDEX idx_podcasts_preprocessing_updated_at ON podcasts(preprocessing_updated_at); 
-CREATE INDEX idx_podcasts_ingestion_updated_at ON podcasts(ingestion_updated_at);
+CREATE INDEX idx_podcasts_ingested_at ON podcasts(ingested_at);
 CREATE INDEX idx_podcasts_source_system_updated_at ON podcasts(source_system_updated_at);
 
 
@@ -65,7 +63,6 @@ CREATE TABLE episodes (
   published_at    TIMESTAMPTZ,
   duration_seconds INTEGER,
   audio_key       TEXT          NOT NULL,
-  xml_key         TEXT,
   transcript_key  TEXT,
   cover_key       TEXT,
   ingested_at     TIMESTAMPTZ   NOT NULL DEFAULT NOW(),

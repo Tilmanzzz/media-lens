@@ -44,6 +44,7 @@ type EpisodeDetail struct {
 	DurationSeconds    int    `json:"duration_seconds"`
 	PublishedAt        string `json:"published_at"`
 	CoverURL           string `json:"cover_url"`
+	AudioURL           string `json:"audio_url,omitempty"`
 	Summary            string `json:"summary"`
 	ProcessingComplete bool   `json:"processing_complete"`
 }
@@ -97,8 +98,14 @@ type FactChecksResponse struct {
 	Claims    []FactCheckClaim `json:"claims"`
 }
 
+type ChatMessage struct {
+	Role    string `json:"role" binding:"required,oneof=user assistant"`
+	Content string `json:"content" binding:"required"`
+}
+
 type ChatRequest struct {
-	Question string `json:"question" binding:"required,max=10000"`
+	Question string        `json:"question" binding:"required,max=10000"`
+	History  []ChatMessage `json:"history,omitempty"`
 }
 
 type ChatResponse struct {

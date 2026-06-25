@@ -141,6 +141,9 @@ func (h *Handler) episodeToDetail(c *gin.Context, ep model.Episode) model.Episod
 	if detail.CoverURL == "" && ep.PodcastImageURL != "" {
 		detail.CoverURL = ep.PodcastImageURL
 	}
+	if ep.AudioKey != "" {
+		detail.AudioURL = "/api/v1/episodes/" + ep.ID + "/audio"
+	}
 	return detail
 }
 

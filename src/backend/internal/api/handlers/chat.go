@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strings"
 
@@ -49,8 +50,9 @@ func (h *Handler) Chat(c *gin.Context) {
 		sb.WriteByte('\n')
 	}
 
-	answer, err := h.LLM.Ask(c.Request.Context(), sb.String(), req.Question)
+	answer, err := h.LLM.Chat(c.Request.Context(), sb.String(), req.History, req.Question)
 	if err != nil {
+		log.Printf("ERROR chat LLM episode=%s: %v", episode.ID, err)
 		respondError(c, http.StatusServiceUnavailable, "LLM_UNAVAILABLE", "LLM-Service ist nicht verfügbar.")
 		return
 	}

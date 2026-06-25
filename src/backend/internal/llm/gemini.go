@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"google.golang.org/genai"
+	"media-lens/backend/internal/model"
 )
 
 const systemPrompt = `You are a podcast analysis assistant. You answer questions about a podcast episode based ONLY on its transcript provided below.
@@ -37,14 +38,34 @@ func NewGeminiClient(ctx context.Context, apiKey string) (*GeminiClient, error) 
 }
 
 func (g *GeminiClient) Ask(ctx context.Context, transcript string, question string) (string, error) {
-	userMessage := fmt.Sprintf("TRANSCRIPT:\n%s\n\nQUESTION:\n%s", transcript, question)
+	return g.Chat(ctx, transcript, nil, question)
+}
+
+func (g *GeminiClient) Chat(ctx context.Context, transcript string, history []model.ChatMessage, question string) (string, error) {
+	sysMsg := fmt.Sprintf("%s\n\nTRANSCRIPT:\n%s", systemPrompt, transcript)
+
+	var contents []*genai.Content
+	for _, msg := range history {
+		role := "user"
+		if msg.Role == "assistant" {
+			role = "model"
+		}
+		contents = append(contents, &genai.Content{
+			Role: role,
+			Parts: []*genai.Part{{Text: msg.Content}},
+		})
+	}
+	contents = append(contents, &genai.Content{
+		Role:  "user",
+		Parts: []*genai.Part{{Text: question}},
+	})
 
 	result, err := g.client.Models.GenerateContent(ctx,
 		g.model,
-		genai.Text(userMessage),
+		contents,
 		&genai.GenerateContentConfig{
 			SystemInstruction: &genai.Content{
-				Parts: []*genai.Part{{Text: systemPrompt}},
+				Parts: []*genai.Part{{Text: sysMsg}},
 			},
 		},
 	)

@@ -14,6 +14,7 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser
 COPY  --from=builder /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 COPY  internal/python/ /app/internal/python/
+COPY  02_processing/common/ /app/common/
 COPY  02_processing/sectioning/main.py /app/main.py
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1

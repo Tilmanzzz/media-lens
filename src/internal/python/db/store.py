@@ -1,6 +1,7 @@
 import logging
 import json
 import asyncpg
+from typing import List, Optional
 
 from .models import Episode
 
@@ -10,9 +11,9 @@ logger = logging.getLogger(__name__)
 class Store:
     def __init__(self, conn_str: str):
         self.conn_str = conn_str
-        self.pool: asyncpg.Pool = None
+        self.pool: Optional[asyncpg.Pool] = None
 
-    async def connect(self):
+    async def connect(self) -> None:
         try:
             self.pool = await asyncpg.create_pool(
                 dsn=self.conn_str, min_size=2, max_size=10
@@ -22,7 +23,7 @@ class Store:
             logger.error(f"Failed to connect to PostgreSQL via asyncpg: {e}")
             raise e
 
-    async def close(self):
+    async def close(self) -> None:
         if self.pool:
             await self.pool.close()
 
@@ -30,7 +31,7 @@ class Store:
         query = """
         SELECT 
             id, podcast_id, guid, title, published_at, duration_seconds, 
-            audio_key, xml_key, transcript_key, cover_key, enclosure_url, summary, batch_id,
+            audio_key, transcript_key, cover_key, enclosure_url, summary, batch_id,
             ingested_at, source_system_updated_at, ingestion_updated_at 
         FROM episodes 
         WHERE id = $1
@@ -40,6 +41,20 @@ class Store:
             raise Exception(f"Episode {episode_id} not found")
 
         return Episode(**row)
+
+    async def get_episodes_for_full_transcription(self) -> List[str]:
+        """Fetches all episode IDs eligible for a full transcription run."""
+        query = (
+            "SELECT id FROM episodes WHERE audio_key IS NOT NULL AND audio_key != ''"
+        )
+        rows = await self.pool.fetch(query)
+        return [str(row["id"]) for row in rows]
+
+    async def get_episodes_for_full_sectioning(self) -> List[str]:
+        """Fetches all episode IDs eligible for a full sectioning/segmenting run."""
+        query = "SELECT id FROM episodes WHERE transcript_key IS NOT NULL AND transcript_key != ''"
+        rows = await self.pool.fetch(query)
+        return [str(row["id"]) for row in rows]
 
     async def set_transcript_key(self, episode_id: str, transcript_key: str) -> None:
         query = "UPDATE episodes SET transcript_key = $1 WHERE id = $2"
@@ -58,8 +73,16 @@ class Store:
         return str(batch_id)
 
     async def complete_pipeline_batch(
-        self, batch_id: str, status: str, notify_channel: str = None
+        self,
+        batch_id: str,
+        status: str,
+        load_mode: str = "delta",
+        notify_channel: Optional[str] = None,
     ) -> None:
+        """
+        Finalizes a pipeline batch, records its status, and propagates notifications
+        with context metadata to downstream services.
+        """
         query = """
             UPDATE pipeline_batches
             SET status = $1::batch_status, fin_ts = NOW()
@@ -72,23 +95,20 @@ class Store:
             )
 
         if status == "success" and notify_channel:
-            payload = json.dumps({"batch_id": batch_id})
+            payload = json.dumps({"batch_id": batch_id, "load_mode": load_mode})
             await self.pool.execute("SELECT pg_notify($1, $2)", notify_channel, payload)
-            logger.info(f"Broadcasted '{notify_channel}' event for batch: {batch_id}")
+            logger.info(
+                f"Broadcasted '{notify_channel}' event for batch: {batch_id} (mode: {load_mode})"
+            )
 
     async def claim_batch_episodes(
         self,
         source_batch_id: str,
         new_batch_id: str,
-    ) -> list[str] | None:
+    ) -> List[str]:
         """
         Atomically re-points all episodes from source_batch to new_batch and
         marks source_batch as 'consumed'.
-
-        The two writes share a transaction so there is no observable state where
-        episodes have moved but the source batch is still 'success' (or vice versa).
-        Returns the claimed episode IDs; an empty list means another worker won the
-        race and the new batch should be discarded.
         """
         async with self.pool.acquire() as conn:
             async with conn.transaction():
@@ -133,10 +153,3 @@ class Store:
 
         if status == "UPDATE 0":
             raise Exception(f"No episode found with id: {episode_id}")
-
-    async def set_podcast_preprocessing_updated_at(self, podcast_id: str) -> None:
-        query = "UPDATE podcasts SET preprocessing_updated_at = NOW() WHERE id = $1"
-        status = await self.pool.execute(query, podcast_id)
-
-        if status == "UPDATE 0":
-            raise Exception(f"No podcast found with id: {podcast_id}")
