@@ -18,19 +18,11 @@ export default async function SearchPage({
   searchParams: Promise<{ q?: string }>;
 }) {
   const { q: query = "" } = await searchParams;
-  
-  if (!query) {
-    return (
-      <div className="mx-auto max-w-7xl px-4 py-12">
-        <div className="max-w-md mb-8">
-          <SearchBar placeholder="Suche nach Episoden oder Podcasts..." />
-        </div>
-        <p className="text-sm text-foreground-subtle">Gib einen Suchbegriff ein.</p>
-      </div>
-    );
-  }
 
-  const { items: episodes, total } = await fetchEpisodes({ q: query, limit: 50 });
+  const hasQuery = query.length > 0;
+  const { items: episodes, total } = hasQuery
+    ? await fetchEpisodes({ q: query, limit: 50 })
+    : { items: [] as EpisodeCard[], total: 0 };
 
   const podcastMap = new Map<string, EpisodeCard>();
   for (const ep of episodes) {
@@ -45,18 +37,22 @@ export default async function SearchPage({
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
       <div className="max-w-md mb-8">
-        <SearchBar placeholder="Suche nach Episoden oder Podcasts..." />
+        <SearchBar placeholder="Suche nach Episoden oder Podcasts..." defaultValue={query} autoFocus />
       </div>
 
-      <p className="text-sm text-foreground-subtle mb-6">
-        <span className="text-foreground font-medium">{total}</span> Ergebnisse für{" "}
-        <span className="text-foreground font-medium">„{query}"</span>
-      </p>
-
-      {episodes.length === 0 ? (
-        <p className="text-sm text-foreground-subtle">Keine Ergebnisse gefunden.</p>
+      {!hasQuery ? (
+        <p className="text-sm text-foreground-subtle">Gib einen Suchbegriff ein.</p>
       ) : (
-        <div className="flex flex-col gap-10">
+        <>
+          <p className="text-sm text-foreground-subtle mb-6">
+            <span className="text-foreground font-medium">{total}</span> Ergebnisse für{" "}
+            <span className="text-foreground font-medium">„{query}"</span>
+          </p>
+
+          {episodes.length === 0 ? (
+            <p className="text-sm text-foreground-subtle">Keine Ergebnisse gefunden.</p>
+          ) : (
+            <div className="flex flex-col gap-10">
 
           {topResult && (
             <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
@@ -189,6 +185,8 @@ export default async function SearchPage({
           )}
 
         </div>
+          )}
+        </>
       )}
     </div>
   );
