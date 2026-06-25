@@ -26,28 +26,40 @@ def load_chunks(input_path: str | Path) -> List[Dict[str, Any]]:
     if isinstance(data, dict) and isinstance(data.get("chunks"), list):
         return data["chunks"]
 
-    raise ValueError("Input JSON must be a list of chunks or an object with a 'chunks' list.")
+    raise ValueError(
+        "Input JSON must be a list of chunks or an object with a 'chunks' list."
+    )
 
 
-def apply_filters(chunks: List[Dict[str, Any]], podcast_id: Any, episode_id: Any, segment_id: Any) -> List[Dict[str, Any]]:
+def apply_filters(
+    chunks: List[Dict[str, Any]], podcast_id: Any, episode_id: Any, segment_id: Any
+) -> List[Dict[str, Any]]:
     filtered = chunks
 
     if podcast_id is not None:
         target = str(podcast_id)
-        filtered = [chunk for chunk in filtered if str(chunk.get("podcast_id")) == target]
+        filtered = [
+            chunk for chunk in filtered if str(chunk.get("podcast_id")) == target
+        ]
 
     if episode_id is not None:
         target = str(episode_id)
-        filtered = [chunk for chunk in filtered if str(chunk.get("episode_id")) == target]
+        filtered = [
+            chunk for chunk in filtered if str(chunk.get("episode_id")) == target
+        ]
 
     if segment_id is not None:
         target = str(segment_id)
-        filtered = [chunk for chunk in filtered if str(chunk.get("segment_id")) == target]
+        filtered = [
+            chunk for chunk in filtered if str(chunk.get("segment_id")) == target
+        ]
 
     return filtered
 
 
-def build_output(embedder: TranscriptEmbedder, chunks: List[Dict[str, Any]], mode: str) -> Dict[str, Any]:
+def build_output(
+    embedder: TranscriptEmbedder, chunks: List[Dict[str, Any]], mode: str
+) -> Dict[str, Any]:
     output: Dict[str, Any] = {"embedded": {}}
 
     if mode in {"chunk", "all"}:
@@ -66,10 +78,22 @@ def build_output(embedder: TranscriptEmbedder, chunks: List[Dict[str, Any]], mod
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Create transcript embeddings for chunk, podcast, episode, and segment levels.")
-    parser.add_argument("--config", default="transcript_embedder_config.json", help="Path to config JSON")
-    parser.add_argument("--input", default=None, help="Path to input transcript chunks JSON")
-    parser.add_argument("--mode", choices=["chunk", "podcast", "episode", "segment", "all"], default=None)
+    parser = argparse.ArgumentParser(
+        description="Create transcript embeddings for chunk, podcast, episode, and segment levels."
+    )
+    parser.add_argument(
+        "--config",
+        default="transcript_embedder_config.json",
+        help="Path to config JSON",
+    )
+    parser.add_argument(
+        "--input", default=None, help="Path to input transcript chunks JSON"
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["chunk", "podcast", "episode", "segment", "all"],
+        default=None,
+    )
 
     parser.add_argument("--podcast-id", default=None)
     parser.add_argument("--episode-id", default=None)
@@ -92,7 +116,9 @@ def main() -> None:
     output_path = args.output or config.default_output_path
 
     chunks = load_chunks(input_path)
-    filtered_chunks = apply_filters(chunks, args.podcast_id, args.episode_id, args.segment_id)
+    filtered_chunks = apply_filters(
+        chunks, args.podcast_id, args.episode_id, args.segment_id
+    )
 
     if not filtered_chunks:
         embedder.logger.warning("No chunks matched the selected filters")

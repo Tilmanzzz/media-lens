@@ -11,15 +11,23 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from pathlib import Path
 
-SRC_DIR = str(Path(__file__).resolve()).split("src")[0] + "src\\02_processing"
-if str(SRC_DIR) not in sys.path:
-    sys.path.append(str(SRC_DIR))
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
+# SRC_DIR = os.path.join(
+#     str(Path(__file__).resolve()).split("src")[0], "src", "02_processing"
+# )
+# if str(SRC_DIR) not in sys.path:
+#     sys.path.append(str(SRC_DIR))
 
 from common.app_logger import child_logger
 from common.db_connector import DbConnector
 from silver_enriched.processing_pipeline.pipeline_utils import (
-    LoadContext, build_pipeline_logger, fetch_db_now,
-    has_new_preprocessed_data, load_json_config)
+    LoadContext,
+    build_pipeline_logger,
+    fetch_db_now,
+    has_new_preprocessed_data,
+    load_json_config,
+)
 
 # Steps that touch disjoint source/target tables and can run concurrently.
 # embedder is intentionally excluded: it depends on text_summarizer's output.
@@ -35,7 +43,10 @@ def _request_shutdown(signum, frame) -> None:
     global _shutdown_requests
     _shutdown_requests += 1
     if _shutdown_requests >= 2:
-        print("pipeline: second interrupt received, forcing immediate exit", file=sys.stderr)
+        print(
+            "pipeline: second interrupt received, forcing immediate exit",
+            file=sys.stderr,
+        )
         os._exit(1)
     print(
         "pipeline: shutdown requested, finishing the current run (if any) then "
@@ -47,11 +58,19 @@ def _request_shutdown(signum, frame) -> None:
 
 def parse_args() -> argparse.Namespace:
     pre_parser = argparse.ArgumentParser(add_help=False)
-    pre_parser.add_argument("--config", default=None, help="Path to pipeline args JSON config")
+    pre_parser.add_argument(
+        "--config", default=None, help="Path to pipeline args JSON config"
+    )
     pre_args, remaining = pre_parser.parse_known_args()
 
-    parser = argparse.ArgumentParser(description="Run processing pipeline steps (full or delta).")
-    parser.add_argument("--config", default="processing_pipeline_config.json", help="Path to pipeline args JSON config")
+    parser = argparse.ArgumentParser(
+        description="Run processing pipeline steps (full or delta)."
+    )
+    parser.add_argument(
+        "--config",
+        default="processing_pipeline_config.json",
+        help="Path to pipeline args JSON config",
+    )
     parser.add_argument("--mode", choices=["full", "delta"], default="delta")
     parser.add_argument("--batch-id", default=None, help="Optional batch UUID override")
     parser.add_argument(
@@ -76,7 +95,7 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=False,
         help="Keep running and self-trigger a pipeline run whenever segmenting "
-             "started more recently than the last successful processing run",
+        "started more recently than the last successful processing run",
     )
     parser.add_argument(
         "--poll-interval",
@@ -84,9 +103,15 @@ def parse_args() -> argparse.Namespace:
         default=60,
         help="Seconds to wait between polls when --poll is set",
     )
-    parser.add_argument("--testing", action="store_true", help="Enable test run parameters")
-    parser.add_argument("--test-episode-id", type=str, default=None, help="Test run: episode id")
-    parser.add_argument("--test-chapter-limit", type=int, default=3, help="Test run: max chapters")
+    parser.add_argument(
+        "--testing", action="store_true", help="Enable test run parameters"
+    )
+    parser.add_argument(
+        "--test-episode-id", type=str, default=None, help="Test run: episode id"
+    )
+    parser.add_argument(
+        "--test-chapter-limit", type=int, default=3, help="Test run: max chapters"
+    )
     parser.add_argument(
         "--test-end-watermark",
         default=None,
@@ -99,10 +124,17 @@ def parse_args() -> argparse.Namespace:
         help="Enable pipeline logging",
     )
     parser.add_argument("--log-level", default="INFO", help="Pipeline logger level")
-    parser.add_argument("--log-dir", default="../logs", help="Optional pipeline log directory")
-    parser.add_argument("--log-file", default="processing_pipeline.log", help="Pipeline log file name")
+    parser.add_argument(
+        "--log-dir", default="../logs", help="Optional pipeline log directory"
+    )
+    parser.add_argument(
+        "--log-file", default="processing_pipeline.log", help="Pipeline log file name"
+    )
 
-    config = load_json_config(pre_args.config or parser.get_default("config"), base_dir=Path(__file__).resolve().parent)
+    config = load_json_config(
+        pre_args.config or parser.get_default("config"),
+        base_dir=Path(__file__).resolve().parent,
+    )
     if config:
         parser.set_defaults(**config)
 
@@ -149,7 +181,9 @@ def run_pipeline(
 
     def run_one(step: str) -> None:
         step_args = copy.copy(args)
-        step_args.stage = step  # pipeline_batches.stage enum value matches the step name
+        step_args.stage = (
+            step  # pipeline_batches.stage enum value matches the step name
+        )
         step_ctx = replace(ctx, logger=child_logger(logger, step))
         with connector.get_connection(logger=logger) as conn:
             logger.info("step: start %s", step)
@@ -158,7 +192,9 @@ def run_pipeline(
 
     parallel_steps = [s for s in steps if s in PARALLEL_STEPS]
     run_embedder = "embedder" in steps
-    pool_size = args.max_workers or max(1, len(parallel_steps) + (1 if run_embedder else 0))
+    pool_size = args.max_workers or max(
+        1, len(parallel_steps) + (1 if run_embedder else 0)
+    )
 
     errors = []
     with ThreadPoolExecutor(max_workers=pool_size) as executor:
@@ -169,6 +205,7 @@ def run_pipeline(
         )
 
         if run_embedder:
+
             def run_embedder_after_summary() -> None:
                 if summarizer_future is not None:
                     try:
@@ -251,7 +288,9 @@ def main() -> None:
             except Exception:
                 logger.exception("pipeline: poll-triggered run failed")
         else:
-            logger.info("poll: no new preprocessed data, sleeping %ss", args.poll_interval)
+            logger.info(
+                "poll: no new preprocessed data, sleeping %ss", args.poll_interval
+            )
 
         _shutdown_event.wait(args.poll_interval)
 
