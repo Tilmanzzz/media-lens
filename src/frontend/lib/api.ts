@@ -71,5 +71,23 @@ export async function fetchSearch(params: {
   const sp = new URLSearchParams({ q: params.q });
   if (params.limit) sp.set("limit", String(params.limit));
   if (params.highlights) sp.set("highlights", String(params.highlights));
-  return backendFetch<SearchResponse>(`/search?${sp}`);
+
+  try {
+    return await backendFetch<SearchResponse>(`/search?${sp}`);
+  } catch {
+    // fallback to text search when embedding service is unavailable
+    const { items } = await fetchEpisodes({ q: params.q, limit: params.limit });
+    return {
+      query: params.q,
+      items: items.map((ep) => ({
+        episode_id: ep.id,
+        title: ep.title,
+        podcast_name: ep.podcast_name,
+        cover_url: ep.cover_url,
+        score: 0,
+        highlights: [],
+      })),
+      total: items.length,
+    };
+  }
 }
