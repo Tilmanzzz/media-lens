@@ -112,7 +112,7 @@ export default function EmotionChart({ data }: EmotionChartProps) {
     ctx.font = "11px sans-serif";
     ctx.textAlign = "center";
     points.forEach((pt, i) => {
-      if (i % 2 === 1) {
+      if (i % 10 === 1) {
         ctx.fillText(formatTime(pt.time), toX(pt.time), H - 6);
       }
     });
@@ -234,18 +234,6 @@ export default function EmotionChart({ data }: EmotionChartProps) {
             </div>
           )}
         </div>
-      </div>
-
-      {/* Farbbalken unten */}
-      <div className="flex gap-1.5 mt-4" style={{ marginLeft: "calc(22px + 1rem + 8px)" }}>
-        {segments.map((seg, i) => (
-          <div
-            key={i}
-            className="rounded flex-1"
-            style={{ height: 24, background: getColor(seg.dominant), minWidth: 20, opacity: 0.85 }}
-            title={seg.dominant}
-          />
-        ))}
       </div>
     </div>
   );
