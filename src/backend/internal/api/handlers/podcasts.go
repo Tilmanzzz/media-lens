@@ -142,12 +142,7 @@ func (h *Handler) episodeToDetail(c *gin.Context, ep model.Episode) model.Episod
 		detail.CoverURL = ep.PodcastImageURL
 	}
 	if ep.AudioKey != "" {
-		u, err := storage.GeneratePresignedURL(c.Request.Context(), h.Minio, h.Config.MinioBucket, ep.AudioKey, 6*time.Hour)
-		if err == nil {
-			detail.AudioURL = u.String()
-		} else {
-			log.Printf("WARN presign audio %q: %v", ep.AudioKey, err)
-		}
+		detail.AudioURL = "/api/v1/episodes/" + ep.ID + "/audio"
 	}
 	return detail
 }

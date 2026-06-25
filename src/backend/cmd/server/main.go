@@ -103,6 +103,7 @@ func main() {
 		v1.GET("/episodes/:id/chapters", handlers.ValidateUUID("id"), h.GetChapters)
 		v1.GET("/episodes/:id/transcript", handlers.ValidateUUID("id"), h.GetTranscript)
 		v1.GET("/episodes/:id/fact-checks", handlers.ValidateUUID("id"), h.GetFactChecks)
+		v1.GET("/episodes/:id/audio", handlers.ValidateUUID("id"), h.StreamAudio)
 		v1.GET("/episodes/:id/sync", handlers.ValidateUUID("id"), h.SyncPlayback)
 		v1.POST("/episodes/:id/chat", handlers.ValidateUUID("id"), h.Chat)
 	}
