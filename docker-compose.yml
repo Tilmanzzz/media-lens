@@ -63,13 +63,13 @@ services:
       - LOG_DIR=${LOG_DIR}
     volumes:
       - ./logs/silver_enriched:/app/logs
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # deploy:
+    #   resources:
+    #     reservations:
+          # devices:
+            # - driver: nvidia
+            #   count: all
+            #   capabilities: [gpu]
 
   transcription:
     build:
@@ -93,14 +93,14 @@ services:
       - LOG_DIR=${LOG_DIR}
     volumes:
       - ./logs/transcription:/app/logs
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+  
   ingestion:
     build:
       context: ./src
