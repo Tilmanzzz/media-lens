@@ -5,12 +5,14 @@ ENV UV_PROJECT_ENVIRONMENT=/app/.venv
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_PYTHON=python3.13
 
-# Copy root lockfiles
+# Copy workspace root, lockfile and member manifests
 COPY pyproject.toml uv.lock ./
+COPY 02_processing/transcription/pyproject.toml 02_processing/transcription/pyproject.toml
+COPY 02_processing/silver_enriched/pyproject.toml 02_processing/silver_enriched/pyproject.toml
 
-# Sync dependencies
+# Sync only the processing member's dependencies
 RUN --mount=type=cache,target=/root/.cache/uv \
-	uv sync --frozen --no-dev
+	uv sync --frozen --no-install-project --no-dev --package processing
 
 FROM python:3.13-slim-bookworm AS runtime
 WORKDIR /app
