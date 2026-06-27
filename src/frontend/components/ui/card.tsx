@@ -38,7 +38,7 @@ export function InfoCard({
 
   return (
     <Link href={`/podcasts/${id}`} className="bg-primary-muted hover:bg-primary-hover shadow-xs rounded-xl">
-      <div className=" relative h-[170px] w-full bg-background-raised">
+      <div className=" relative h-[170px] w-full bg-background-raised rounded-t-xl">
         {cover_url ? (
           <Image src={cover_url} alt={title} fill className="object-cover rounded-t-xl" />
         ) : (
