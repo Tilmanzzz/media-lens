@@ -12,12 +12,15 @@ function formatTimestamp(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+type SearchType = "episode" | "chapter" | "podcast";
+
 export default async function SearchPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; type?: string }>;
 }) {
-  const { q: query = "" } = await searchParams;
+  const { q: query = "", type: rawType } = await searchParams;
+  const type = (rawType as SearchType) ?? "episode";
 
   const hasQuery = query.length > 0;
   const { items: results, total } = hasQuery
@@ -37,7 +40,12 @@ export default async function SearchPage({
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
       <div className="max-w-md mb-8">
-        <SearchBar placeholder="Suche nach Episoden oder Podcasts..." defaultValue={query} autoFocus />
+        <SearchBar
+          placeholder="Suche nach Episoden oder Podcasts..."
+          defaultValue={query}
+          defaultType={type}
+          autoFocus
+        />
       </div>
 
       {!hasQuery ? (
