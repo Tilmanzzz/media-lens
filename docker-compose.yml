@@ -46,23 +46,27 @@ services:
 
   sectioning:
     build:
-      context: ./src
-      dockerfile: ./02_processing/silver_enriched/Dockerfile
+      context: ./src/
+      # Adjust this path if the worker is inside silver_enriched or its own module
+      dockerfile: ./02_processing/sectioning/Dockerfile 
     depends_on:
-      minio:
-        condition: service_healthy
       postgres:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     env_file:
       - .env
     environment:
+      - POSTGRES_URL=${POSTGRES_URL}
       - MINIO_ENDPOINT=${MINIO_ENDPOINT}
       - MINIO_USER=${MINIO_USER}
       - MINIO_PASS=${MINIO_PASS}
-      - POSTGRES_URL=${POSTGRES_URL}
-      - LOG_DIR=${LOG_DIR}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - LOG_LEVEL=INFO
+      - LOG_DIR=/app/logs
     volumes:
-      - ./logs/silver_enriched:/app/logs
+      - ./logs/sectioning:/app/logs
+    restart: unless-stopped
     # deploy:
     #   resources:
     #     reservations:
@@ -185,7 +189,7 @@ services:
   frontend:
     build:
       context: ./src/frontend
-      dockerfile: ./Dockerfile
+      dockerfile: ./Dockerfile.dev
     ports:
       - "3000:3000"
     environment:
