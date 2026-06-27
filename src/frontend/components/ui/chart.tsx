@@ -3,10 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 
 export interface EmotionSegment {
-  start: number;   // Sekunden
-  end: number;     // Sekunden
+  start: number;
+  end: number;
   dominant: string;
-  score: number;   // 0–1
+  score: number; // 0–1
 }
 
 export interface EmotionData {
@@ -15,6 +15,8 @@ export interface EmotionData {
 
 interface EmotionChartProps {
   data: EmotionData;
+  currentTime?: number;
+  onSeek?: (time: number) => void;
 }
 
 const EMOTION_COLORS: Record<string, string> = {
@@ -26,6 +28,14 @@ const EMOTION_COLORS: Record<string, string> = {
 
 const ALL_EMOTIONS = ["angry", "happy", "neutral", "sad"];
 
+const PX_PER_SECOND = 4;
+const MIN_CANVAS_WIDTH = 600;
+const CANVAS_H = 180;
+const PAD_L = 12;
+const PAD_R = 12;
+const PAD_T = 16;
+const PAD_B = 28;
+
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
@@ -36,65 +46,62 @@ function getColor(emotion: string): string {
   return EMOTION_COLORS[emotion] ?? "#888780";
 }
 
-export default function EmotionChart({ data }: EmotionChartProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const wrapperRef = useRef<HTMLDivElement>(null);
+export default function EmotionChart({ data, currentTime = 0, onSeek }: EmotionChartProps) {
+  const canvasRef   = useRef<HTMLCanvasElement>(null);
+  const playheadRef = useRef<HTMLCanvasElement>(null);
+  const scrollRef   = useRef<HTMLDivElement>(null);
+  const wrapperRef  = useRef<HTMLDivElement>(null);
+
   const [tooltip, setTooltip] = useState<{
     x: number;
     y: number;
     segment: EmotionSegment;
   } | null>(null);
 
-  const segments = data.segments;
+  const segments      = data.segments;
   const totalDuration = segments.at(-1)?.end ?? 1;
+  const canvasWidth   = Math.max(MIN_CANVAS_WIDTH, PX_PER_SECOND * totalDuration);
 
-  // Datenpunkte: Mitte jedes Segments
+  const toX = (t: number) => PAD_L + (t / totalDuration) * (canvasWidth - PAD_L - PAD_R);
+  const toY = (v: number) => PAD_T + ((100 - v) / 100) * (CANVAS_H - PAD_T - PAD_B);
+
   const points = segments.map((seg) => ({
     time: (seg.start + seg.end) / 2,
     value: Math.round(seg.score * 100),
     segment: seg,
   }));
 
+  // Haupt-Chart zeichnen
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
+    canvas.width  = canvasWidth * dpr;
+    canvas.height = CANVAS_H * dpr;
+    canvas.style.width  = `${canvasWidth}px`;
+    canvas.style.height = `${CANVAS_H}px`;
 
     const ctx = canvas.getContext("2d")!;
     ctx.scale(dpr, dpr);
 
-    const W = rect.width;
-    const H = rect.height;
-    const PAD_L = 12;
-    const PAD_R = 12;
-    const PAD_T = 16;
-    const PAD_B = 28;
-
-    // Theme-Farben aus CSS-Variablen lesen
-    const computedStyle = getComputedStyle(document.documentElement);
-    const textSecondary = computedStyle.getPropertyValue("--color-text-secondary").trim() || "rgba(128,128,128,0.6)";
-    const borderColor = computedStyle.getPropertyValue("--color-border-tertiary").trim() || "rgba(128,128,128,0.15)";
-    const textPrimary = computedStyle.getPropertyValue("--color-text-primary").trim() || "#000";
-
-    const toX = (t: number) => PAD_L + (t / totalDuration) * (W - PAD_L - PAD_R);
-    const toY = (v: number) => PAD_T + ((100 - v) / 100) * (H - PAD_T - PAD_B);
+    const cs          = getComputedStyle(document.documentElement);
+    const textSecondary = cs.getPropertyValue("--color-text-secondary").trim()  || "rgba(128,128,128,0.6)";
+    const borderColor   = cs.getPropertyValue("--color-border-tertiary").trim() || "rgba(128,128,128,0.15)";
+    const textPrimary   = cs.getPropertyValue("--color-text-primary").trim()    || "#000";
 
     // Hintergrundlinien
     ctx.strokeStyle = borderColor;
     ctx.lineWidth = 0.5;
     for (let i = 0; i <= 4; i++) {
-      const y = PAD_T + (i / 4) * (H - PAD_T - PAD_B);
+      const y = PAD_T + (i / 4) * (CANVAS_H - PAD_T - PAD_B);
       ctx.beginPath();
       ctx.moveTo(PAD_L, y);
-      ctx.lineTo(W - PAD_R, y);
+      ctx.lineTo(canvasWidth - PAD_R, y);
       ctx.stroke();
     }
 
-    // Linie zwischen Punkten
+    // Verbindungslinie
     ctx.beginPath();
     ctx.strokeStyle = textPrimary;
     ctx.lineWidth = 2;
@@ -107,17 +114,17 @@ export default function EmotionChart({ data }: EmotionChartProps) {
     });
     ctx.stroke();
 
-    // Zeitlabels auf X-Achse (nur bei bestimmten Segmenten)
+    // Nur Startzeit links und Endzeit rechts
     ctx.fillStyle = textSecondary;
     ctx.font = "11px sans-serif";
-    ctx.textAlign = "center";
-    points.forEach((pt, i) => {
-      if (i % 10 === 1) {
-        ctx.fillText(formatTime(pt.time), toX(pt.time), H - 6);
-      }
-    });
+    if (points.length > 0) {
+      ctx.textAlign = "left";
+      ctx.fillText(formatTime(points[0].segment.start), PAD_L, CANVAS_H - 6);
+      ctx.textAlign = "right";
+      ctx.fillText(formatTime(points[points.length - 1].segment.end), canvasWidth - PAD_R, CANVAS_H - 6);
+    }
 
-    // Punkte zeichnen
+    // Punkte
     points.forEach((pt) => {
       const x = toX(pt.time);
       const y = toY(pt.value);
@@ -128,38 +135,95 @@ export default function EmotionChart({ data }: EmotionChartProps) {
       ctx.fillStyle = color;
       ctx.fill();
 
-      // Ring
       ctx.beginPath();
       ctx.arc(x, y, 7, 0, Math.PI * 2);
       ctx.strokeStyle = borderColor;
       ctx.lineWidth = 1.5;
       ctx.stroke();
     });
-  }, [data, points, totalDuration]);
+  }, [data, canvasWidth]);
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    const wrapper = wrapperRef.current;
-    if (!canvas || !wrapper) return;
+  // Playhead zeichnen
+  useEffect(() => {
+    const canvas = playheadRef.current;
+    if (!canvas) return;
 
-    const rect = canvas.getBoundingClientRect();
-    const W = rect.width;
-    const PAD_L = 12;
-    const PAD_R = 12;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width  = canvasWidth * dpr;
+    canvas.height = CANVAS_H * dpr;
+    canvas.style.width  = `${canvasWidth}px`;
+    canvas.style.height = `${CANVAS_H}px`;
 
-    const mouseX = e.clientX - rect.left;
+    const ctx = canvas.getContext("2d")!;
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, canvasWidth, CANVAS_H);
 
-    const toX = (t: number) => PAD_L + (t / totalDuration) * (W - PAD_L - PAD_R);
+    const x = toX(currentTime);
 
-    // Nächsten Punkt finden
+    ctx.beginPath();
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 3]);
+    ctx.moveTo(x, PAD_T);
+    ctx.lineTo(x, CANVAS_H - PAD_B);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.beginPath();
+    ctx.arc(x, PAD_T, 4, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.fill();
+  }, [currentTime, canvasWidth]);
+
+  // Auto-Scroll: Playhead im Sichtbereich halten
+  useEffect(() => {
+    const scroll = scrollRef.current;
+    if (!scroll) return;
+    const x      = toX(currentTime);
+    const margin = 80;
+    const left   = scroll.scrollLeft;
+    const right  = left + scroll.clientWidth;
+    if (x > right - margin) {
+      scroll.scrollLeft = x - scroll.clientWidth + margin * 2;
+    } else if (x < left + margin && left > 0) {
+      scroll.scrollLeft = Math.max(0, x - margin * 2);
+    }
+  }, [currentTime]);
+
+  // Klick → seek
+  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!onSeek || !scrollRef.current) return;
+    const rect      = scrollRef.current.getBoundingClientRect();
+    const mouseX    = e.clientX - rect.left + scrollRef.current.scrollLeft;
+    const clickTime = ((mouseX - PAD_L) / (canvasWidth - PAD_L - PAD_R)) * totalDuration;
+
     let closest = points[0];
     let minDist = Infinity;
     points.forEach((pt) => {
       const dist = Math.abs(toX(pt.time) - mouseX);
-      if (dist < minDist) {
-        minDist = dist;
-        closest = pt;
-      }
+      if (dist < minDist) { minDist = dist; closest = pt; }
+    });
+
+    onSeek(minDist < 30
+      ? closest.segment.start
+      : Math.max(0, Math.min(totalDuration, clickTime))
+    );
+  };
+
+  // Tooltip bei Hover
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const wrapper = wrapperRef.current;
+    const scroll  = scrollRef.current;
+    if (!wrapper || !scroll) return;
+
+    const rect   = scroll.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left + scroll.scrollLeft;
+
+    let closest = points[0];
+    let minDist = Infinity;
+    points.forEach((pt) => {
+      const dist = Math.abs(toX(pt.time) - mouseX);
+      if (dist < minDist) { minDist = dist; closest = pt; }
     });
 
     if (minDist < 30) {
@@ -176,13 +240,10 @@ export default function EmotionChart({ data }: EmotionChartProps) {
 
   return (
     <div className="w-full rounded-xl p-5">
-      {/* Titel */}
-      <p className="text-lg font-medium mb-4">
-        Emotionchart
-      </p>
+      <p className="text-lg font-medium mb-4">Emotionchart</p>
 
-      <div className="flex gap-4">
-        {/* Legende links – immer alle 4 Emotionen */}
+      <div className="flex gap-4 min-w-0">
+        {/* Legende – immer alle 4 Emotionen */}
         <div className="flex flex-col gap-2 justify-around shrink-0">
           {ALL_EMOTIONS.map((em) => (
             <div key={em} className="flex items-center gap-2">
@@ -197,31 +258,49 @@ export default function EmotionChart({ data }: EmotionChartProps) {
           ))}
         </div>
 
-        {/* Chart */}
-        <div ref={wrapperRef} className="flex-1 relative" style={{ height: 200 }}>
-          <canvas
-            ref={canvasRef}
+        {/* Chart + Farbbalken in einem scrollbaren Container */}
+        <div ref={wrapperRef} className="flex-1 min-w-0 relative">
+          <div
+            ref={scrollRef}
+            className="overflow-x-auto cursor-pointer"
+            onClick={handleClick}
             onMouseMove={handleMouseMove}
             onMouseLeave={() => setTooltip(null)}
-            className="w-full h-full cursor-crosshair"
-            role="img"
-            aria-label="Emotionsverlauf des Podcasts"
-          />
+          >
+            {/* Canvas-Bereich */}
+            <div className="relative" style={{ width: canvasWidth, height: CANVAS_H }}>
+              <canvas ref={canvasRef}   className="absolute top-0 left-0 pointer-events-none" />
+              <canvas ref={playheadRef} className="absolute top-0 left-0 pointer-events-none" />
+            </div>
+
+            {/* Farbbalken direkt darunter – scrollt mit */}
+            <div className="flex gap-1.5 mt-2 pb-1" style={{ width: canvasWidth }}>
+              {segments.map((seg, i) => (
+                <div
+                  key={i}
+                  className="rounded flex-1 transition-opacity"
+                  style={{
+                    height: 20,
+                    background: getColor(seg.dominant),
+                    minWidth: 16,
+                    opacity: currentTime >= seg.start && currentTime < seg.end ? 1 : 0.55,
+                  }}
+                  title={`${seg.dominant} – ${formatTime(seg.start)}`}
+                />
+              ))}
+            </div>
+          </div>
 
           {/* Tooltip */}
           {tooltip && (
             <div
-              className="absolute pointer-events-none rounded-lg px-3 py-2 text-xs bg-background-raised border border-border text-foreground"
-              style={{
-                left: tooltip.x - 60,
-                top: tooltip.y - 76,
-                minWidth: 120,
-              }}
+              className="absolute pointer-events-none rounded-lg px-3 py-2 text-xs bg-background-raised border border-border text-foreground z-10"
+              style={{ left: tooltip.x - 60, top: tooltip.y - 80, minWidth: 120 }}
             >
               <div className="flex items-center gap-2 mb-1">
                 <div
-                  className="rounded-sm"
-                  style={{ width: 10, height: 10, background: getColor(tooltip.segment.dominant), flexShrink: 0 }}
+                  className="rounded-sm shrink-0"
+                  style={{ width: 10, height: 10, background: getColor(tooltip.segment.dominant) }}
                 />
                 <span className="font-medium">{tooltip.segment.dominant}</span>
               </div>
