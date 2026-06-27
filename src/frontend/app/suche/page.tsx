@@ -40,6 +40,9 @@ export default async function SearchPage({
   }
   const podcasts = Array.from(podcastMap.values());
 
+  const type = (searchParams.type as "episode" | "chapter" | "podcast") ?? "episode";
+  const results = await fetchEpisodes({ q, type });
+
   const topResult = episodes[0] ?? null;
 
   return (
