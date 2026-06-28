@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'docker-compose.yml' # Adjust if named docker-compose.prod.yml
+      - 'docker-compose.prod.yml' # Adjust if named docker-compose.prod.yml
       - 'storage/**'
       - '.github/workflows/update-deploy.yml'
 
