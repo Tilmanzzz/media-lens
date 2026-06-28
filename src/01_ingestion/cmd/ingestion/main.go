@@ -22,10 +22,11 @@ import (
 )
 
 type worker struct {
-	store      *db.Store
-	bronze     *blob.Bucket
-	httpClient *http.Client
-	feedParser *gofeed.Parser
+	store            *db.Store
+	bronze           *blob.Bucket
+	httpClient       *http.Client
+	feedParser       *gofeed.Parser
+	fallbackImageURL string
 }
 
 type triggerPayload struct {
@@ -75,12 +76,11 @@ func listenLoop(ctx context.Context, w *worker, pgURL string) error {
 	}
 	defer conn.Close(ctx)
 
-	_, err = conn.Exec(ctx, "LISTEN ingestion_trigger")
+	_, err = conn.Exec(ctx, "LISTEN ingestion_ready")
 	if err != nil {
 		return fmt.Errorf("failed to execute LISTEN: %w", err)
 	}
 
-	// Keep-alive heartbeat
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -183,22 +183,27 @@ func setupWorker(ctx context.Context) *worker {
 		log.Fatalf("minio connection failed: %v", err)
 	}
 
+	frontendURL := os.Getenv("FRONTEND_PUBLIC_URL")
+	if frontendURL == "" {
+		log.Fatal("FRONTEND_PUBLIC_URL environment variable is required")
+	}
+	fallbackImg := strings.TrimRight(frontendURL, "/") + "/fallback-cover.svg"
+
 	return &worker{
-		store:      store,
-		bronze:     bronze,
-		httpClient: &http.Client{Timeout: 15 * time.Minute},
-		feedParser: gofeed.NewParser(),
+		store:            store,
+		bronze:           bronze,
+		httpClient:       &http.Client{Timeout: 15 * time.Minute},
+		feedParser:       gofeed.NewParser(),
+		fallbackImageURL: fallbackImg,
 	}
 }
 
 func (w *worker) processPodcast(ctx context.Context, p db.Podcast, loadMode, batchID string) ([]db.Episode, error) {
-	// fetch raw xml for storage
 	req, err := http.NewRequestWithContext(ctx, "GET", p.FeedURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// impersonate Apple Podcasts to avoid being blocked by CDNs
 	req.Header.Set("User-Agent", "AppleCoreMedia/1.0.0.19E266 (iPhone; U; CPU OS 15_4_1 like Mac OS X; en_us)")
 	req.Header.Set("Accept", "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
@@ -218,7 +223,6 @@ func (w *worker) processPodcast(ctx context.Context, p db.Podcast, loadMode, bat
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	// upload feed snapshot to minio
 	xmlKey, err := w.bronze.UploadPodcastMetadata(
 		ctx,
 		p.ID,
@@ -233,13 +237,11 @@ func (w *worker) processPodcast(ctx context.Context, p db.Podcast, loadMode, bat
 		return nil, fmt.Errorf("failed to upload xml to minio: %w", err)
 	}
 
-	// parse feed from downloaded bytes
 	feed, err := w.feedParser.Parse(bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("feed parse error: %w", err)
 	}
 
-	// mark ingested and save the xml path
 	if err := w.store.MarkPodcastIngested(ctx, p.ID, batchID, xmlKey); err != nil {
 		return nil, fmt.Errorf("failed to link batch to podcast record: %w", err)
 	}
@@ -281,13 +283,11 @@ func (w *worker) processEpisode(
 	}
 	enclosureURL := item.Enclosures[0].URL
 
-	// extract reliable timestamp
 	episodeUpdated := extractEpisodeTimestamp(item)
 
 	existingEp, exists := existingEps[item.GUID]
 	isChanged := loadMode == "full" || !exists
 
-	// tier 2 delta check: did this specific episode change?
 	if !isChanged {
 		if existingEp.EnclosureURL != enclosureURL {
 			isChanged = true
@@ -301,7 +301,6 @@ func (w *worker) processEpisode(
 		return nil, nil
 	}
 
-	// stop previous pipeline runs if replacing an episode
 	if exists && existingEp.BatchID != "" {
 		_ = w.store.StopPreviousBatchIfNeeded(ctx, existingEp.BatchID)
 	}
@@ -311,15 +310,28 @@ func (w *worker) processEpisode(
 		return nil, fmt.Errorf("audio upload failed: %w", err)
 	}
 
+	// Route missing images directly to the fallback URL before attempting upload
 	imageURL := extractImageURL(item)
+	if imageURL == "" {
+		imageURL = w.fallbackImageURL
+	}
+
 	var coverKey string
-	if imageURL != "" {
-		key, err := w.uploadMedia(ctx, p.ID, item.GUID, "cover", "image", imageURL, "image/webp,image/apng,image/*,*/*;q=0.8")
-		if err != nil {
-			log.Printf("warning: cover upload failed for %s: %v", item.GUID, err)
-		} else {
+	key, err := w.uploadMedia(ctx, p.ID, item.GUID, "cover", "image", imageURL, "image/webp,image/apng,image/*,*/*;q=0.8")
+
+	// If the original remote URL failed (e.g., 404 or CDN block), attempt to upload the fallback instead
+	if err != nil && imageURL != w.fallbackImageURL {
+		log.Printf("warning: remote cover upload failed for %s, attempting fallback: %v", item.GUID, err)
+		key, err = w.uploadMedia(ctx, p.ID, item.GUID, "cover", "image", w.fallbackImageURL, "image/webp,image/apng,image/*,*/*;q=0.8")
+		if err == nil {
 			coverKey = key
+		} else {
+			log.Printf("warning: fallback cover upload also failed for %s: %v", item.GUID, err)
 		}
+	} else if err == nil {
+		coverKey = key
+	} else {
+		log.Printf("warning: fallback cover upload failed for %s: %v", item.GUID, err)
 	}
 
 	var duration *int
@@ -350,7 +362,6 @@ func (w *worker) uploadMedia(
 		return "", err
 	}
 
-	// impersonate Apple Podcasts to bypass CDNs
 	req.Header.Set("User-Agent", "AppleCoreMedia/1.0.0.19E266 (iPhone; U; CPU OS 15_4_1 like Mac OS X; en_us)")
 	req.Header.Set("Accept", acceptHeader)
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
@@ -384,7 +395,6 @@ func (w *worker) flushEpisodes(ctx context.Context, eps []db.Episode) error {
 }
 
 func extractEpisodeTimestamp(item *gofeed.Item) time.Time {
-	// 1. try standard parsed fields first
 	if item.UpdatedParsed != nil {
 		return item.UpdatedParsed.Truncate(time.Second)
 	}
@@ -392,13 +402,11 @@ func extractEpisodeTimestamp(item *gofeed.Item) time.Time {
 		return item.PublishedParsed.Truncate(time.Second)
 	}
 
-	// 2. fallback to raw string
 	rawDate := item.Updated
 	if rawDate == "" {
 		rawDate = item.Published
 	}
 
-	// 3. aggressively force parse against common formats
 	if rawDate != "" {
 		formats := []string{
 			time.RFC1123Z, time.RFC1123, time.RFC822Z, time.RFC822,
@@ -415,7 +423,6 @@ func extractEpisodeTimestamp(item *gofeed.Item) time.Time {
 		log.Printf("[Warning] Failed to parse custom date format: %s", rawDate)
 	}
 
-	// 4. absolute fallback prevents infinite delta loops
 	return time.Unix(0, 0)
 }
 

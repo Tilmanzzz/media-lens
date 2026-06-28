@@ -1,0 +1,95 @@
+name: Build and Push Docker Images
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/tilmanzzz/media-lens
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 1. Sectioning
+      - name: Build and push Sectioning
+        uses: docker/build-push-action@v5
+        with:
+          context: ./src/
+          file: ./src/02_processing/sectioning/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-sectioning:latest
+
+      # 2. Transcription
+      - name: Build and push Transcription
+        uses: docker/build-push-action@v5
+        with:
+          context: ./src/
+          file: ./src/02_processing/transcription/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-transcription:latest
+
+      # 3. Ingestion
+      - name: Build and push Ingestion
+        uses: docker/build-push-action@v5
+        with:
+          context: ./src/
+          file: ./src/01_ingestion/Dockerfile
+          target: ingestion
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-ingestion:latest
+
+      # 4. Insertion
+      - name: Build and push Insertion
+        uses: docker/build-push-action@v5
+        with:
+          context: ./src/
+          file: ./src/01_ingestion/Dockerfile
+          target: insertion
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-insertion:latest
+
+      # 5. Processing (Silver Enriched)
+      - name: Build and push Processing
+        uses: docker/build-push-action@v5
+        with:
+          context: ./src/
+          file: ./src/02_processing/silver_enriched/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-processing:latest
+
+      # 6. Backend
+      - name: Build and push Backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./src/backend
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-backend:latest
+
+      # 7. Frontend
+      - name: Build and push Frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./src/frontend
+          file: ./src/frontend/Dockerfile.dev
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-frontend:latest

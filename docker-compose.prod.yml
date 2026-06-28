@@ -27,7 +27,8 @@ services:
       - ./storage/db/pgadmin/servers.json:/pgadmin4/servers.json
       - pgadmin_data:/var/lib/pgadmin
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
   minio:
     image: minio/minio
@@ -45,36 +46,28 @@ services:
       retries: 1
 
   sectioning:
-    build:
-      context: ./src
-      dockerfile: ./02_processing/silver_enriched/Dockerfile
+    image: ghcr.io/<YOUR_GITHUB_USERNAME>/audiolens-sectioning:latest
     depends_on:
-      minio:
-        condition: service_healthy
       postgres:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     env_file:
       - .env
     environment:
+      - POSTGRES_URL=${POSTGRES_URL}
       - MINIO_ENDPOINT=${MINIO_ENDPOINT}
       - MINIO_USER=${MINIO_USER}
       - MINIO_PASS=${MINIO_PASS}
-      - POSTGRES_URL=${POSTGRES_URL}
-      - LOG_DIR=${LOG_DIR}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - LOG_LEVEL=INFO
+      - LOG_DIR=/app/logs
     volumes:
-      - ./logs/silver_enriched:/app/logs
-    # deploy:
-    #   resources:
-    #     reservations:
-          # devices:
-            # - driver: nvidia
-            #   count: all
-            #   capabilities: [gpu]
+      - ./logs/sectioning:/app/logs
+    restart: unless-stopped
 
   transcription:
-    build:
-      context: ./src/
-      dockerfile: ./02_processing/transcription/Dockerfile
+    image: ghcr.io/<YOUR_GITHUB_USERNAME>/audiolens-transcription:latest
     depends_on:
       minio:
         condition: service_healthy
@@ -93,19 +86,10 @@ services:
       - LOG_DIR=${LOG_DIR}
     volumes:
       - ./logs/transcription:/app/logs
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+    restart: unless-stopped
   
   ingestion:
-    build:
-      context: ./src
-      dockerfile: ./01_ingestion/Dockerfile
-      target: ingestion
+    image: ghcr.io/<YOUR_GITHUB_USERNAME>/audiolens-ingestion:latest
     depends_on:
       minio:
         condition: service_healthy
@@ -121,12 +105,11 @@ services:
       - MINIO_PASS=${MINIO_PASS}
       - POSTGRES_URL=${POSTGRES_URL}
       - LOAD_MODE=${LOAD_MODE}
+      - FRONTEND_PUBLIC_URL=${FRONTEND_PUBLIC_URL}
+    restart: unless-stopped
 
   insertion:
-    build:
-      context: ./src/
-      dockerfile: ./01_ingestion/Dockerfile
-      target: insertion
+    image: ghcr.io/<YOUR_GITHUB_USERNAME>/audiolens-insertion:latest
     depends_on:
       minio:
         condition: service_healthy
@@ -142,11 +125,10 @@ services:
       - MINIO_USER=${MINIO_USER}
       - MINIO_PASS=${MINIO_PASS}
       - POSTGRES_URL=${POSTGRES_URL}
+      - FRONTEND_PUBLIC_URL=${FRONTEND_PUBLIC_URL}
 
   processing:
-    build:
-      context: ./src/
-      dockerfile: ./02_processing/silver_enriched/Dockerfile
+    image: ghcr.io/<YOUR_GITHUB_USERNAME>/audiolens-processing:latest
     depends_on:
       postgres:
         condition: service_healthy
@@ -162,9 +144,10 @@ services:
     volumes:
       - ./logs/processing:/app/src/02_processing/logs
     command: ["--poll", "--poll-interval", "60", "--log-enabled"]
+    restart: unless-stopped
 
   backend:
-    build: ./src/backend
+    image: ghcr.io/<YOUR_GITHUB_USERNAME>/audiolens-backend:latest
     ports:
       - "8080:8080"
     depends_on:
@@ -181,6 +164,18 @@ services:
       - MINIO_PASS=${MINIO_PASS}
       - BACKEND_PORT=:8080
       - CORS_ORIGINS=http://localhost:3000
+    restart: unless-stopped
+
+  frontend:
+    image: ghcr.io/<YOUR_GITHUB_USERNAME>/audiolens-frontend:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - BACKEND_URL=http://backend:8080 
+    depends_on:
+      - backend
+    restart: unless-stopped
 
 volumes:
   postgres_data:

@@ -1,0 +1,48 @@
+name: Update Deploy Branch
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docker-compose.prod.yml' # Adjust if named docker-compose.prod.yml
+      - 'storage/**'
+      - '.github/workflows/update-deploy.yml'
+
+jobs:
+  update-deploy-branch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare deployment payload
+        run: |
+          # Create the required directory structure
+          mkdir -p deploy_payload/logs/{sectioning,transcription,processing}
+          mkdir -p deploy_payload/storage/db/pgadmin
+          
+          # Add .gitkeep files to ensure Git tracks the empty directories
+          touch deploy_payload/logs/sectioning/.gitkeep
+          touch deploy_payload/logs/transcription/.gitkeep
+          touch deploy_payload/logs/processing/.gitkeep
+          touch deploy_payload/storage/db/pgadmin/.gitkeep
+          
+          # Copy the actual configuration files
+          cp docker-compose.prod.yml deploy_payload/docker-compose.yml
+          cp storage/db/init_v2.sql deploy_payload/storage/db/
+          cp storage/db/pgadmin/servers.json deploy_payload/storage/db/pgadmin/
+          
+          # (Optional) Copy your .env.example template if you have one
+          # cp .env.example deploy_payload/
+
+      - name: Push to orphan deploy branch
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: deploy
+          folder: deploy_payload
+          single-commit: true # Maintains an orphan branch with no history
+          clean: true

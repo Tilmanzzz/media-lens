@@ -9,7 +9,7 @@ const verdictConfig: Record<FactVerdict, { label: string; bg: string; border: st
   MOSTLY_TRUE:  { label: "Mostly true", bg: "bg-success-bg",   border: "border-success",  text: "text-success"  },
   MISLEADING:   { label: "Misleading",   bg: "bg-warning-bg",      border: "border-warning",  text: "text-warning"  },
   FALSE:        { label: "False",        bg: "bg-danger-bg",       border: "border-danger",   text: "text-danger"   },
-  UNVERIFIABLE: { label: "Unverrifiable",     bg: "bg-background-card", border: "border-border",   text: "text-foreground-subtle" },
+  UNVERIFIABLE: { label: "Unverifiable",     bg: "bg-background-card", border: "border-border",   text: "text-foreground-subtle" },
 };
 
 export function FactCheckCard({ claim }: FactCheckCardProps) {
