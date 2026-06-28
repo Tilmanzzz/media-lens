@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface EmotionSegment {
   start: number;
@@ -62,8 +62,14 @@ export default function EmotionChart({ data, currentTime = 0, onSeek }: EmotionC
   const totalDuration = segments.at(-1)?.end ?? 1;
   const canvasWidth   = Math.max(MIN_CANVAS_WIDTH, PX_PER_SECOND * totalDuration);
 
-  const toX = (t: number) => PAD_L + (t / totalDuration) * (canvasWidth - PAD_L - PAD_R);
-  const toY = (v: number) => PAD_T + ((100 - v) / 100) * (CANVAS_H - PAD_T - PAD_B);
+  const toX = useCallback(
+    (t: number) => PAD_L + (t / totalDuration) * (canvasWidth - PAD_L - PAD_R),
+    [totalDuration, canvasWidth]
+  );
+  const toY = useCallback(
+    (v: number) => PAD_T + ((100 - v) / 100) * (CANVAS_H - PAD_T - PAD_B),
+    []
+  );
 
   const points = segments.map((seg) => ({
     time: (seg.start + seg.end) / 2,
@@ -141,7 +147,7 @@ export default function EmotionChart({ data, currentTime = 0, onSeek }: EmotionC
       ctx.lineWidth = 1.5;
       ctx.stroke();
     });
-  }, [data, canvasWidth]);
+  }, [points, canvasWidth, toX, toY]);
 
   // Playhead zeichnen
   useEffect(() => {
@@ -173,7 +179,7 @@ export default function EmotionChart({ data, currentTime = 0, onSeek }: EmotionC
     ctx.arc(x, PAD_T, 4, 0, Math.PI * 2);
     ctx.fillStyle = "rgba(255,255,255,0.9)";
     ctx.fill();
-  }, [currentTime, canvasWidth]);
+  }, [currentTime, canvasWidth, toX]);
 
   // Auto-Scroll: Playhead im Sichtbereich halten
   useEffect(() => {
@@ -188,7 +194,7 @@ export default function EmotionChart({ data, currentTime = 0, onSeek }: EmotionC
     } else if (x < left + margin && left > 0) {
       scroll.scrollLeft = Math.max(0, x - margin * 2);
     }
-  }, [currentTime]);
+  }, [currentTime, toX]);
 
   // Klick → seek
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -273,22 +279,6 @@ export default function EmotionChart({ data, currentTime = 0, onSeek }: EmotionC
               <canvas ref={playheadRef} className="absolute top-0 left-0 pointer-events-none" />
             </div>
 
-            {/* Farbbalken direkt darunter – scrollt mit */}
-            <div className="flex gap-1.5 mt-2 pb-1" style={{ width: canvasWidth }}>
-              {segments.map((seg, i) => (
-                <div
-                  key={i}
-                  className="rounded flex-1 transition-opacity"
-                  style={{
-                    height: 20,
-                    background: getColor(seg.dominant),
-                    minWidth: 16,
-                    opacity: currentTime >= seg.start && currentTime < seg.end ? 1 : 0.55,
-                  }}
-                  title={`${seg.dominant} – ${formatTime(seg.start)}`}
-                />
-              ))}
-            </div>
           </div>
 
           {/* Tooltip */}

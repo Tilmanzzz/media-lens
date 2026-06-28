@@ -46,7 +46,7 @@ services:
       retries: 1
 
   sectioning:
-    image: ghcr.io/<YOUR_GITHUB_USERNAME>/audiolens-sectioning:latest
+    image: ghcr.io/tilmanzzz/media-lens-sectioning:latest
     depends_on:
       postgres:
         condition: service_healthy
@@ -67,7 +67,7 @@ services:
     restart: unless-stopped
 
   transcription:
-    image: ghcr.io/<YOUR_GITHUB_USERNAME>/audiolens-transcription:latest
+    image: ghcr.io/tilmanzzz/media-lens-transcription:latest
     depends_on:
       minio:
         condition: service_healthy
@@ -89,7 +89,7 @@ services:
     restart: unless-stopped
   
   ingestion:
-    image: ghcr.io/<YOUR_GITHUB_USERNAME>/audiolens-ingestion:latest
+    image: ghcr.io/tilmanzzz/media-lens-ingestion:latest
     depends_on:
       minio:
         condition: service_healthy
@@ -109,7 +109,7 @@ services:
     restart: unless-stopped
 
   insertion:
-    image: ghcr.io/<YOUR_GITHUB_USERNAME>/audiolens-insertion:latest
+    image: ghcr.io/tilmanzzz/media-lens-insertion:latest
     depends_on:
       minio:
         condition: service_healthy
@@ -128,7 +128,7 @@ services:
       - FRONTEND_PUBLIC_URL=${FRONTEND_PUBLIC_URL}
 
   processing:
-    image: ghcr.io/<YOUR_GITHUB_USERNAME>/audiolens-processing:latest
+    image: ghcr.io/tilmanzzz/media-lens-processing:latest
     depends_on:
       postgres:
         condition: service_healthy
@@ -147,7 +147,7 @@ services:
     restart: unless-stopped
 
   backend:
-    image: ghcr.io/<YOUR_GITHUB_USERNAME>/audiolens-backend:latest
+    image: ghcr.io/tilmanzzz/media-lens-backend:latest
     ports:
       - "8080:8080"
     depends_on:
@@ -167,7 +167,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: ghcr.io/<YOUR_GITHUB_USERNAME>/audiolens-frontend:latest
+    image: ghcr.io/tilmanzzz/media-lens-frontend:latest
     ports:
       - "3000:3000"
     environment:
