@@ -20,6 +20,12 @@ export default function AudioPlayer({ src, onTimeUpdate, seekRef }: AudioPlayerP
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
 
+  const updateDuration = (audio: HTMLAudioElement) => {
+    if (isFinite(audio.duration) && audio.duration > 0) {
+      setDuration(audio.duration);
+    }
+  };
+
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -28,21 +34,30 @@ export default function AudioPlayer({ src, onTimeUpdate, seekRef }: AudioPlayerP
       setCurrentTime(audio.currentTime);
       onTimeUpdate?.(audio.currentTime);
     };
-    const handleLoadedMetadata = () => setDuration(audio.duration);
+    // loadedmetadata: normaler Fall
+    const handleLoadedMetadata = () => updateDuration(audio);
+    // durationchange: Fallback z.B. bei Streaming oder Cache
+    const handleDurationChange = () => updateDuration(audio);
     const handleEnded = () => setIsPlaying(false);
 
     audio.addEventListener("timeupdate", handleTimeUpdate);
     audio.addEventListener("loadedmetadata", handleLoadedMetadata);
+    audio.addEventListener("durationchange", handleDurationChange);
     audio.addEventListener("ended", handleEnded);
+
+    // Falls Metadaten schon geladen sind (Cache), direkt auslesen
+    if (audio.readyState >= 1) {
+      updateDuration(audio);
+    }
 
     return () => {
       audio.removeEventListener("timeupdate", handleTimeUpdate);
       audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      audio.removeEventListener("durationchange", handleDurationChange);
       audio.removeEventListener("ended", handleEnded);
     };
   }, [onTimeUpdate]);
 
-  // Seek-Funktion nach außen verfügbar machen
   useEffect(() => {
     if (seekRef) {
       seekRef.current = (time: number) => {
@@ -80,7 +95,7 @@ export default function AudioPlayer({ src, onTimeUpdate, seekRef }: AudioPlayerP
 
   return (
     <div className="flex items-center gap-4 px-6 py-5 max-w-5xl rounded-xl bg-background-card border border-border">
-      <audio ref={audioRef} src={src} />
+      <audio ref={audioRef} src={src} preload="metadata" />
 
       <button
         onClick={togglePlay}
@@ -90,7 +105,7 @@ export default function AudioPlayer({ src, onTimeUpdate, seekRef }: AudioPlayerP
         {isPlaying ? <PauseIcon /> : <PlayIcon />}
       </button>
 
-      <div className="flex flex-col  gap-1.5 flex-1">
+      <div className="flex flex-col gap-1.5 flex-1">
         <input
           type="range"
           min={0}
@@ -103,7 +118,7 @@ export default function AudioPlayer({ src, onTimeUpdate, seekRef }: AudioPlayerP
         />
         <div className="flex justify-between text-xs text-foreground-subtle">
           <span>{formatTime(currentTime)}</span>
-          <span>{formatTime(duration)}</span>
+          <span>{duration > 0 ? formatTime(duration) : "--:--"}</span>
         </div>
       </div>
     </div>
