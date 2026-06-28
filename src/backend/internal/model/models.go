@@ -150,8 +150,8 @@ type ApiError struct {
 }
 
 type HealthStatus struct {
-	Status   string `json:"status"`
-	Database string `json:"database"`
-	MinIO    string `json:"minio"`
-	Ollama   string `json:"ollama"`
+	Status    string `json:"status"`
+	Database  string `json:"database"`
+	MinIO     string `json:"minio"`
+	Embedding string `json:"embedding"`
 }

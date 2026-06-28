@@ -54,10 +54,23 @@ func main() {
 		log.Fatalf("Failed to connect to MinIO: %v", err)
 	}
 
-	ollamaClient := embedder.NewOllamaClient(cfg.OllamaURL, cfg.EmbeddingModel)
 	pgvectorClient := vectorstore.NewPgVectorClient(db)
 
 	ctx := context.Background()
+
+	var emb embedder.Embedder
+	switch cfg.EmbeddingProvider {
+	case "gemini":
+		emb, err = embedder.NewGeminiEmbedder(ctx, cfg.GeminiAPIKey, cfg.EmbeddingModel, cfg.EmbeddingDimension)
+		if err != nil {
+			log.Fatalf("Failed to create Gemini embedder: %v", err)
+		}
+		log.Printf("Using Gemini embedding provider (model: %s, dim: %d)", cfg.EmbeddingModel, cfg.EmbeddingDimension)
+	default:
+		emb = embedder.NewOllamaClient(cfg.OllamaURL, cfg.EmbeddingModel)
+		log.Printf("Using Ollama embedding provider (model: %s, url: %s)", cfg.EmbeddingModel, cfg.OllamaURL)
+	}
+
 	geminiClient, err := llm.NewGeminiClient(ctx, cfg.GeminiAPIKey)
 	if err != nil {
 		log.Fatalf("Failed to create Gemini client: %v", err)
@@ -77,7 +90,7 @@ func main() {
 		Minio:       minioClient,
 		Config:      cfg,
 		DB:          db,
-		Embedder:    ollamaClient,
+		Embedder:    emb,
 		VectorStore: pgvectorClient,
 	}
 
