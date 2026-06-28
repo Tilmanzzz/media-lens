@@ -31,7 +31,7 @@ func (h *Handler) SemanticSearch(c *gin.Context) {
 
 	limit := parseIntParam(c.Query("limit"), 10, 50)
 	highlights := parseIntParam(c.Query("highlights"), 3, 10)
-	minScore := parseFloatParam(c.Query("min_score"), 0.3)
+	minScore := parseFloatParam(c.Query("min_score"), 0.01)
 
 	vector, err := h.Embedder.Embed(c.Request.Context(), q)
 	if err != nil {

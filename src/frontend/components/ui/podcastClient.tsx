@@ -97,8 +97,6 @@ export default function PodcastDetailClient({
             {panels.emotionChart && (
               <EmotionChart
                 data={emotionData}
-                currentTime={currentTime}
-                onSeek={handleSeek}
               />
             )}
           </PodcastPlayer>

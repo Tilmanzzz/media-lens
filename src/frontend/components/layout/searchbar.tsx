@@ -1,7 +1,7 @@
 "use client";
 import { Search } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { useState, useRef, useTransition } from "react";
 
 type SearchType = "episode" | "chapter" | "podcast";
 
@@ -13,31 +13,50 @@ const FILTER_OPTIONS: { label: string; value: SearchType }[] = [
 
 type SearchBarProps = {
   placeholder?: string;
+  defaultValue?: string;
+  defaultType?: SearchType | null;
+  autoFocus?: boolean;
 };
 
-export function SearchBar({ placeholder = "Suche..." }: SearchBarProps) {
+export function SearchBar({
+  placeholder = "Suche...",
+  defaultValue = "",
+  defaultType = null,
+  autoFocus = false,
+}: SearchBarProps) {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [, startTransition] = useTransition();
 
-  const currentType = (searchParams.get("type") as SearchType) ?? "episode";
+  const [value, setValue] = useState(defaultValue);
+  const [currentType, setCurrentType] = useState<SearchType | null>(defaultType);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const updateParams = (q?: string, type?: SearchType) => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (q !== undefined) {
-      if (q) params.set("q", q);
-      else   params.delete("q");
-    }
+  const navigate = (q: string, type: SearchType | null) => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
     if (type) params.set("type", type);
-    params.delete("page");
     startTransition(() => {
       router.replace(`/suche?${params.toString()}`);
     });
   };
 
+  const handleChange = (next: string) => {
+    setValue(next);
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      navigate(next, currentType);
+    }, 300);
+  };
+
+  const handleTypeChange = (type: SearchType) => {
+    const next = currentType === type ? null : type;
+    setCurrentType(next);
+    navigate(value, next);
+  };
+
   return (
     <div className="flex flex-col gap-3 w-full max-w-md">
-      {/* Suchfeld */}
       <div className="relative w-full">
         <Search
           className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-foreground-subtle"
@@ -46,9 +65,10 @@ export function SearchBar({ placeholder = "Suche..." }: SearchBarProps) {
         />
         <input
           type="search"
-          value={searchParams.get("q") ?? ""}
-          onChange={(e) => updateParams(e.target.value, undefined)}
+          value={value}
+          onChange={(e) => handleChange(e.target.value)}
           placeholder={placeholder}
+          autoFocus={autoFocus}
           className="w-full rounded-2xl border border-border bg-background-card py-3 pl-10 pr-4 text-sm text-foreground outline-none transition placeholder:text-foreground-subtle focus:border-border-strong focus:bg-background-raised"
         />
       </div>
@@ -58,7 +78,7 @@ export function SearchBar({ placeholder = "Suche..." }: SearchBarProps) {
         {FILTER_OPTIONS.map((opt) => (
           <button
             key={opt.value}
-            onClick={() => updateParams(undefined, opt.value)}
+            onClick={() => handleTypeChange(opt.value)}
             className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all cursor-pointer
               ${currentType === opt.value
                 ? "bg-primary-muted border-primary text-foreground"
