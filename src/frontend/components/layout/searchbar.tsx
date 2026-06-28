@@ -14,27 +14,27 @@ const FILTER_OPTIONS: { label: string; value: SearchType }[] = [
 type SearchBarProps = {
   placeholder?: string;
   defaultValue?: string;
-  defaultType?: SearchType;
+  defaultType?: SearchType | null;
   autoFocus?: boolean;
 };
 
 export function SearchBar({
   placeholder = "Suche...",
   defaultValue = "",
-  defaultType = "episode",
+  defaultType = null,
   autoFocus = false,
 }: SearchBarProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
 
   const [value, setValue] = useState(defaultValue);
-  const [currentType, setCurrentType] = useState<SearchType>(defaultType);
+  const [currentType, setCurrentType] = useState<SearchType | null>(defaultType);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const navigate = (q: string, type: SearchType) => {
+  const navigate = (q: string, type: SearchType | null) => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
-    if (type !== "episode") params.set("type", type);
+    if (type) params.set("type", type);
     startTransition(() => {
       router.replace(`/suche?${params.toString()}`);
     });
@@ -50,8 +50,9 @@ export function SearchBar({
   };
 
   const handleTypeChange = (type: SearchType) => {
-    setCurrentType(type);
-    navigate(value, type);
+    const next = currentType === type ? null : type;
+    setCurrentType(next);
+    navigate(value, next);
   };
 
   return (

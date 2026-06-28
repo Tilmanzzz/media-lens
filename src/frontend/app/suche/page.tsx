@@ -20,7 +20,7 @@ export default async function SearchPage({
   searchParams: Promise<{ q?: string; type?: string }>;
 }) {
   const { q: query = "", type: rawType } = await searchParams;
-  const type = (rawType as SearchType) ?? "episode";
+  const type = (rawType as SearchType) ?? null;
 
   const hasQuery = query.length > 0;
   const { items: results, total } = hasQuery
@@ -36,6 +36,14 @@ export default async function SearchPage({
   const podcasts = Array.from(podcastMap.values());
 
   const topResult = results[0] ?? null;
+
+  const showEpisodes = !type || type === "episode";
+  const showChapters = !type || type === "chapter";
+  const showPodcasts = !type || type === "podcast";
+
+  const allHighlights = results.flatMap((r) =>
+    r.highlights.map((h) => ({ ...h, episode_id: r.episode_id, title: r.title, podcast_name: r.podcast_name, cover_url: r.cover_url }))
+  );
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
@@ -62,7 +70,8 @@ export default async function SearchPage({
           ) : (
             <div className="flex flex-col gap-10">
 
-          {topResult && (
+          {/* ── Default-Ansicht (kein Filter): Bestes Ergebnis + Top 5 + Rest + Chapters + Podcasts ── */}
+          {!type && topResult && (
             <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
               <div>
                 <p className="text-base font-medium text-foreground mb-4">Bestes Ergebnis</p>
@@ -133,7 +142,7 @@ export default async function SearchPage({
             </div>
           )}
 
-          {results.length > 5 && (
+          {!type && results.length > 5 && (
             <div>
               <p className="text-base font-medium text-foreground mb-4">
                 Alle Episoden
@@ -170,7 +179,82 @@ export default async function SearchPage({
             </div>
           )}
 
-          {podcasts.length > 0 && (
+          {/* ── Filter: nur Episoden ── */}
+          {type === "episode" && results.length > 0 && (
+            <div>
+              <p className="text-base font-medium text-foreground mb-4">
+                Episoden
+                <span className="ml-2 text-sm text-foreground-subtle font-normal">({results.length})</span>
+              </p>
+              <div className="flex flex-col gap-0.5">
+                {results.map((r) => (
+                  <Link
+                    key={r.episode_id}
+                    href={`/podcasts/${r.episode_id}`}
+                    className="grid grid-cols-[48px_1fr] items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-background-card transition-colors group"
+                  >
+                    <div className="relative w-12 h-12 rounded overflow-hidden shrink-0">
+                      {r.cover_url ? (
+                        <Image src={r.cover_url} alt={r.title} fill className="object-cover" />
+                      ) : (
+                        <div className="w-full h-full bg-background-card flex items-center justify-center">
+                          <span className="text-foreground-subtle text-[10px]">Kein Cover</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{r.title}</p>
+                      <p className="text-xs text-foreground-subtle truncate">{r.podcast_name}</p>
+                      {r.highlights.length > 0 && (
+                        <p className="text-xs text-foreground-subtle truncate italic">
+                          {formatTimestamp(r.highlights[0].start_time)} – „{r.highlights[0].text}"
+                        </p>
+                      )}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Filter: nur Chapters / Default: Chapters-Sektion ── */}
+          {showChapters && allHighlights.length > 0 && (
+            <div>
+              <p className="text-base font-medium text-foreground mb-4">
+                Chapters
+                <span className="ml-2 text-sm text-foreground-subtle font-normal">({allHighlights.length})</span>
+              </p>
+              <div className="flex flex-col gap-0.5">
+                {allHighlights.map((h, index) => (
+                  <Link
+                    key={`${h.episode_id}-${h.start_time}-${index}`}
+                    href={`/podcasts/${h.episode_id}`}
+                    className="grid grid-cols-[48px_1fr] items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-background-card transition-colors"
+                  >
+                    <div className="relative w-12 h-12 rounded overflow-hidden shrink-0">
+                      {h.cover_url ? (
+                        <Image src={h.cover_url} alt={h.title} fill className="object-cover" />
+                      ) : (
+                        <div className="w-full h-full bg-background-card flex items-center justify-center">
+                          <span className="text-foreground-subtle text-[10px]">Kein Cover</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{h.title}</p>
+                      <p className="text-xs text-foreground-subtle truncate">{h.podcast_name}</p>
+                      <p className="text-xs text-foreground-subtle truncate italic">
+                        {formatTimestamp(h.start_time)} – „{h.text}"
+                      </p>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Filter: nur Podcasts / Default: Podcasts-Sektion ── */}
+          {showPodcasts && podcasts.length > 0 && (
             <div>
               <p className="text-base font-medium text-foreground mb-4">
                 Podcasts
