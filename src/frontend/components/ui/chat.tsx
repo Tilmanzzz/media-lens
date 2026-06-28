@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
 
 interface Message {
   role: "user" | "assistant";
@@ -11,11 +11,54 @@ interface Message {
 interface RagChatProps {
   episodeId: string;
   placeholder?: string;
+  onSeek?: (time: number) => void;
+}
+
+function parseTimestamp(ts: string): number {
+  const parts = ts.split(":").map(Number);
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return parts[0] * 60 + parts[1];
+}
+
+const TIMESTAMP_RE = /\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g;
+
+function renderWithTimestamps(text: string, onSeek?: (time: number) => void): ReactNode[] {
+  if (!onSeek) return [text];
+
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = TIMESTAMP_RE.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+    const ts = match[1];
+    const seconds = parseTimestamp(ts);
+    nodes.push(
+      <button
+        key={`${match.index}-${ts}`}
+        type="button"
+        onClick={() => onSeek(seconds)}
+        className="inline text-accent hover:text-accent-hover underline underline-offset-2 cursor-pointer font-medium"
+      >
+        [{ts}]
+      </button>
+    );
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes.length > 0 ? nodes : [text];
 }
 
 export default function RagChat({
   episodeId,
   placeholder = "Ask something about the episode..",
+  onSeek,
 }: RagChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -103,7 +146,7 @@ export default function RagChat({
                   : "bg-background-raised text-foreground border border-border rounded-bl-sm"
                 }`}
             >
-              {msg.content}
+              {msg.role === "assistant" ? renderWithTimestamps(msg.content, onSeek) : msg.content}
             </div>
           </div>
         ))}
