@@ -92,12 +92,10 @@ export default function AudioPlayer({ src, onTimeUpdate, seekRef }: AudioPlayerP
     setCurrentTime(newTime);
     onTimeUpdate?.(newTime);
   };
-  const proxiedSrc = src.replace("http://minio:9000", "/storage");
 
   return (
     <div className="flex items-center gap-4 px-6 py-5 max-w-5xl rounded-xl bg-background-card border border-border">
       <audio ref={audioRef} src={src} preload="metadata" />
-
 
       <button
         onClick={togglePlay}
