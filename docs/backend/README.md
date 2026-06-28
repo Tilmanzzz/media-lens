@@ -5,7 +5,7 @@
 
 ## Was ist das Backend?
 
-Das Backend ist die HTTP-API-Schicht der Audio-Lens-Plattform. Es nimmt die von der
+Das Backend ist die HTTP-API-Schicht der Media-Lens-Plattform. Es nimmt die von der
 Processing-Pipeline (Silver Enriched) angereicherten Daten aus PostgreSQL und stellt sie dem
 Frontend als REST-API bereit. Zusätzlich bietet es:
 
