@@ -125,6 +125,7 @@ services:
       - MINIO_PASS=${MINIO_PASS}
       - POSTGRES_URL=${POSTGRES_URL}
       - LOAD_MODE=${LOAD_MODE}
+      - FRONTEND_PUBLIC_URL=${FRONTEND_PUBLIC_URL}
 
   insertion:
     build:
@@ -146,6 +147,7 @@ services:
       - MINIO_USER=${MINIO_USER}
       - MINIO_PASS=${MINIO_PASS}
       - POSTGRES_URL=${POSTGRES_URL}
+      - FRONTEND_PUBLIC_URL=${FRONTEND_PUBLIC_URL}
 
   processing:
     build:

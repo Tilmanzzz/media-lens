@@ -141,7 +141,17 @@ class Store:
             raise Exception(f"No episode found with id: {episode_id}")
 
     async def set_preprocessing_updated_at(self, episode_id: str) -> None:
-        query = "UPDATE episodes SET preprocessing_updated_at = NOW() WHERE id = $1"
+        query = """
+            WITH updated_episode AS (
+                UPDATE episodes
+                SET preprocessing_updated_at = NOW()
+                WHERE id = $1
+                RETURNING podcast_id, preprocessing_updated_at
+            )
+            UPDATE podcasts
+            SET preprocessing_updated_at = (SELECT preprocessing_updated_at FROM updated_episode)
+            WHERE id = (SELECT podcast_id FROM updated_episode);
+        """
         status = await self.pool.execute(query, episode_id)
 
         if status == "UPDATE 0":
