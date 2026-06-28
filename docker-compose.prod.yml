@@ -147,7 +147,7 @@ services:
     restart: unless-stopped
 
   backend:
-    image: ghcr.io/tilmanzzz-media-lens-backend:latest
+    image: ghcr.io/tilmanzzz/media-lens-backend:latest
     ports:
       - "8080:8080"
     depends_on:
