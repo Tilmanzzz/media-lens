@@ -84,8 +84,10 @@ export default function PodcastDetailClient({
     <div className="flex flex-col gap-6 w-full bg-background-raised mt-6 px-4 py-6">
 
       {/* Oben: Player + EmotionChart links, Menü rechts */}
-      <div className="flex flex-row gap-6">
-        <div className="flex-1">
+      <div className="flex flex-row gap-6 min-w-0">
+
+        {/* flex-1 min-w-0 verhindert dass der Chart aus dem Flex-Container rausbricht */}
+        <div className="flex-1 min-w-0">
           <PodcastPlayer
             src={src}
             chapters={sorted}
@@ -121,6 +123,7 @@ export default function PodcastDetailClient({
           </div>
         </div>
       </div>
+
       {/* Transkript – volle Breite */}
       {panels.transcript && allLines.length > 0 && (
         <div>
@@ -132,6 +135,7 @@ export default function PodcastDetailClient({
           />
         </div>
       )}
+
       {/* Chapters + Faktencheck – volle Breite, 50/50 */}
       {(panels.themen || panels.faktencheck) && (
         <div className="flex flex-row gap-6 items-start">
