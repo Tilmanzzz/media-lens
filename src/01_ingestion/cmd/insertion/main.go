@@ -62,19 +62,25 @@ func main() {
 
 	if len(os.Args) < 2 {
 		seedURLs = []string{
-			"https://feeds.megaphone.fm/RSV1597324942", // tucker carlson
-			"https://feeds.megaphone.fm/surrounded",
-			"https://plot-house.podigee.io/feed/mp3",
-			"https://feeds.megaphone.fm/ADL5417720568", // radio headspace
-			"https://anchor.fm/s/fc0e8c18/podcast/rss",
-			"https://rss.buzzsprout.com/1032730.rss",
-			"https://feeds.captivate.fm/thebest5minutewine/",
+			//"https://feeds.megaphone.fm/RSV1597324942",
+			//"https://feeds.megaphone.fm/surrounded",
+			//"https://plot-house.podigee.io/feed/mp3",
+			//"https://feeds.megaphone.fm/ADL5417720568",
+			//"https://anchor.fm/s/fc0e8c18/podcast/rss",
+			//"https://rss.buzzsprout.com/1032730.rss",
+			//"https://feeds.captivate.fm/thebest5minutewine/",
 			"https://feeds.transistor.fm/5-minute-morning-show",
 			"https://feed.podbean.com/themicropodcast/feed.xml",
 		}
 	} else {
 		seedURLs = os.Args[1:]
 	}
+
+	frontendURL := os.Getenv("FRONTEND_PUBLIC_URL")
+	if frontendURL == "" {
+		log.Fatal("FRONTEND_PUBLIC_URL environment variable is required")
+	}
+	fallbackImageURL := strings.TrimRight(frontendURL, "/") + "fallback-cover.svg"
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -87,7 +93,7 @@ func main() {
 
 	parser := gofeed.NewParser()
 
-	go startDiscoveryLoop(ctx, store, parser, seedURLs, discoveryInterval, maxDiscoveryTicks)
+	go startDiscoveryLoop(ctx, store, parser, seedURLs, discoveryInterval, maxDiscoveryTicks, fallbackImageURL)
 	go startPollingLoop(ctx, store, parser, pollingInterval)
 
 	log.Printf("Metadata module successfully started. Polling interval: %v | Discovery interval: %v", pollingInterval, discoveryInterval)
@@ -99,11 +105,11 @@ func main() {
 	log.Println("Termination signal received. Shutting down metadata module operations...")
 }
 
-func startDiscoveryLoop(ctx context.Context, store *db.Store, parser *gofeed.Parser, seedURLs []string, interval time.Duration, maxDiscoverPerTick int) {
+func startDiscoveryLoop(ctx context.Context, store *db.Store, parser *gofeed.Parser, seedURLs []string, interval time.Duration, maxDiscoverPerTick int, fallbackImageURL string) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	runDiscoveryPass(ctx, store, parser, seedURLs, maxDiscoverPerTick)
+	runDiscoveryPass(ctx, store, parser, seedURLs, maxDiscoverPerTick, fallbackImageURL)
 
 	for {
 		select {
@@ -111,12 +117,12 @@ func startDiscoveryLoop(ctx context.Context, store *db.Store, parser *gofeed.Par
 			log.Println("Discovery loop stopped cleanly.")
 			return
 		case <-ticker.C:
-			runDiscoveryPass(ctx, store, parser, seedURLs, maxDiscoverPerTick)
+			runDiscoveryPass(ctx, store, parser, seedURLs, maxDiscoverPerTick, fallbackImageURL)
 		}
 	}
 }
 
-func runDiscoveryPass(ctx context.Context, store *db.Store, parser *gofeed.Parser, seedURLs []string, maxDiscover int) {
+func runDiscoveryPass(ctx context.Context, store *db.Store, parser *gofeed.Parser, seedURLs []string, maxDiscover int, fallbackImageURL string) {
 	log.Println("[Discovery] Starting discovery cycle...")
 
 	tracked, err := store.GetPodcastsForIngestion(ctx, "full")
@@ -157,8 +163,17 @@ func runDiscoveryPass(ctx context.Context, store *db.Store, parser *gofeed.Parse
 		}
 
 		var imageURL *string
-		if feed.Image != nil {
+		if feed.Image != nil && feed.Image.URL != "" {
 			imageURL = strPtr(feed.Image.URL)
+		} else if itunes := feed.Extensions["itunes"]; itunes != nil && len(itunes["image"]) > 0 {
+			href := itunes["image"][0].Attrs["href"]
+			if href != "" {
+				imageURL = strPtr(href)
+			} else {
+				imageURL = strPtr(fallbackImageURL)
+			}
+		} else {
+			imageURL = strPtr(fallbackImageURL)
 		}
 
 		var publishedAt *time.Time
@@ -178,13 +193,11 @@ func runDiscoveryPass(ctx context.Context, store *db.Store, parser *gofeed.Parse
 			remoteUpdateTime = feed.Items[0].PublishedParsed
 		}
 
-		// set source_updated_at to now if none has been found
 		if remoteUpdateTime == nil {
 			now := time.Now()
 			remoteUpdateTime = &now
 		}
 
-		// truncate to seconds
 		if remoteUpdateTime != nil {
 			truncated := remoteUpdateTime.Truncate(time.Second)
 			remoteUpdateTime = &truncated
@@ -318,7 +331,7 @@ func sendIngestionTrigger(ctx context.Context, dbURL, mode string) {
 	defer conn.Close(ctx)
 
 	payload := fmt.Sprintf(`{"load_mode": "%s"}`, mode)
-	_, err = conn.Exec(ctx, "SELECT pg_notify('ingestion_trigger', $1)", payload)
+	_, err = conn.Exec(ctx, "SELECT pg_notify('ingestion_ready', $1)", payload)
 	if err != nil {
 		log.Printf("[Trigger] Failed to send ingestion notification: %v", err)
 	} else {

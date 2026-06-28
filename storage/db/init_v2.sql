@@ -38,6 +38,7 @@ CREATE TABLE podcasts (
   categories          TEXT[],
   image_url           TEXT,
   ingested_at         TIMESTAMPTZ, 
+  preprocessing_updated_at TIMESTAMPTZ,
   published_at        TIMESTAMPTZ,
   batch_id            UUID        REFERENCES pipeline_batches(id) ON DELETE SET NULL,
   -- lastUpdateTime: The channel-level pubDate for the feed, if it’s sane.
