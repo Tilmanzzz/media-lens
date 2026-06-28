@@ -221,3 +221,6 @@ dist/
 *.ipynb
 **/hf_superb/pg_dump_silver_enriched_19062026
 pg_dump_*
+
+# Apple
+.DS_Store
