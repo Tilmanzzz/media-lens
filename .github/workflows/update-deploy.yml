@@ -32,7 +32,7 @@ jobs:
           touch deploy_payload/storage/db/pgadmin/.gitkeep
           
           # Copy the actual configuration files
-          cp docker-compose.yml deploy_payload/
+          cp docker-compose.prod.yml deploy_payload/docker-compose.yml
           cp storage/db/init_v2.sql deploy_payload/storage/db/
           cp storage/db/pgadmin/servers.json deploy_payload/storage/db/pgadmin/
           
