@@ -95,9 +95,11 @@ export default function PodcastDetailClient({
             seekRef={seekRef as MutableRefObject<((time: number) => void) | null>}
           >
             {panels.emotionChart && (
-              <EmotionChart
-                data={emotionData}
-              />
+            <EmotionChart
+              data={emotionData}
+              currentTime={currentTime}
+              onSeek={handleSeek}
+            />
             )}
           </PodcastPlayer>
         </div>
