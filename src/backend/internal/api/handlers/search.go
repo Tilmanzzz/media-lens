@@ -1,13 +1,13 @@
 package handlers
 
 import (
+	"media-lens/backend/internal/model"
+	"media-lens/backend/internal/storage"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"media-lens/backend/internal/model"
-	"media-lens/backend/internal/storage"
 )
 
 // @Summary      Semantic search
@@ -31,7 +31,7 @@ func (h *Handler) SemanticSearch(c *gin.Context) {
 
 	limit := parseIntParam(c.Query("limit"), 10, 50)
 	highlights := parseIntParam(c.Query("highlights"), 3, 10)
-	minScore := parseFloatParam(c.Query("min_score"), 0.01)
+	minScore := parseFloatParam(c.Query("min_score"), 0.73)
 
 	vector, err := h.Embedder.Embed(c.Request.Context(), q)
 	if err != nil {

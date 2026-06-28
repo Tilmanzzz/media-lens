@@ -17,10 +17,10 @@ import (
 // @Router       /health [get]
 func (h *Handler) HealthCheck(c *gin.Context) {
 	status := model.HealthStatus{
-		Status:   "UP",
-		Database: "UP",
-		MinIO:    "UP",
-		Ollama:   "UP",
+		Status:    "UP",
+		Database:  "UP",
+		MinIO:     "UP",
+		Embedding: "UP",
 	}
 
 	if err := h.DB.Ping(); err != nil {
@@ -35,7 +35,7 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 
 	if err := h.Embedder.HealthCheck(c.Request.Context()); err != nil {
 		status.Status = "DEGRADED"
-		status.Ollama = "DOWN"
+		status.Embedding = "DOWN"
 	}
 
 	if status.Status != "UP" {

@@ -28,7 +28,7 @@ type Handler struct {
 	Minio       *minio.Client
 	Config      *config.Config
 	DB          *sql.DB
-	Embedder    *embedder.OllamaClient
+	Embedder    embedder.Embedder
 	VectorStore *vectorstore.PgVectorClient
 }
 
