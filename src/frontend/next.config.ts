@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
   },
   allowedDevOrigins: ['141.62.115.192', 'localhost'],
   images: {
+    dangerouslyAllowLocalIP: true,
     remotePatterns: [
       {
         protocol: "http",

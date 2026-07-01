@@ -42,3 +42,10 @@ git reset --hard origin/deploy
 docker compose pull
 docker compose up -d
 ```
+
+## CI/CD Architecture
+**Image Build & Registry**: Triggered on pushes to the main branch. This workflow leverages Docker Buildx to compile the microservices and build optimized, multi-stage Docker images. The resulting images are tagged and pushed to the GitHub Container Registry (GHCR).
+
+- Note on caching: We use the GitHub Actions cache (type=gha, mode=max) to speed up builds by storing intermediate layers. Each service is assigned a unique scope key so the parallel builds don't overwrite each other's cache data.
+
+**Deployment Payload Updates**: Triggered only when infrastructure or configuration files change (e.g., docker-compose.prod.yml, storage directories). This workflow aggregates the production compose file, database initialization scripts, and provisions necessary volume directories (such as empty log folders). It then force-pushes this payload as a single commit to the orphan deploy branch, ensuring the production server pulls only the necessary configuration state.
