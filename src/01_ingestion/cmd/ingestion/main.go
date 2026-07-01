@@ -183,18 +183,21 @@ func setupWorker(ctx context.Context) *worker {
 		log.Fatalf("minio connection failed: %v", err)
 	}
 
-	frontendURL := os.Getenv("FRONTEND_PUBLIC_URL")
-	if frontendURL == "" {
-		log.Fatal("FRONTEND_PUBLIC_URL environment variable is required")
+	data, err := os.ReadFile("assets/fallback_cover.png")
+	if err != nil {
+		log.Fatalf("failed to read fallback cover: %v", err)
 	}
-	fallbackImg := strings.TrimRight(frontendURL, "/") + "/fallback-cover.svg"
+	fallbackKey, err := bronze.UploadSystemAsset(ctx, "_system/cover/fallback-cover.png", "image/png", data)
+	if err != nil {
+		log.Fatalf("failed to upload fallback cover: %v", err)
+	}
 
 	return &worker{
 		store:            store,
 		bronze:           bronze,
 		httpClient:       &http.Client{Timeout: 15 * time.Minute},
 		feedParser:       gofeed.NewParser(),
-		fallbackImageURL: fallbackImg,
+		fallbackImageURL: fallbackKey,
 	}
 }
 
@@ -310,28 +313,38 @@ func (w *worker) processEpisode(
 		return nil, fmt.Errorf("audio upload failed: %w", err)
 	}
 
-	// Route missing images directly to the fallback URL before attempting upload
+	var (
+		coverKey string
+		key      string
+	)
 	imageURL := extractImageURL(item)
-	if imageURL == "" {
-		imageURL = w.fallbackImageURL
-	}
 
-	var coverKey string
-	key, err := w.uploadMedia(ctx, p.ID, item.GUID, "cover", "image", imageURL, "image/webp,image/apng,image/*,*/*;q=0.8")
+	switch {
+	case imageURL == "":
+		// switch for fallback image if none was found
+		coverKey = w.fallbackImageURL
 
-	// If the original remote URL failed (e.g., 404 or CDN block), attempt to upload the fallback instead
-	if err != nil && imageURL != w.fallbackImageURL {
-		log.Printf("warning: remote cover upload failed for %s, attempting fallback: %v", item.GUID, err)
-		key, err = w.uploadMedia(ctx, p.ID, item.GUID, "cover", "image", w.fallbackImageURL, "image/webp,image/apng,image/*,*/*;q=0.8")
-		if err == nil {
-			coverKey = key
+	default:
+		key, err = w.uploadMedia(
+			ctx,
+			p.ID,
+			item.GUID,
+			"cover",
+			"image",
+			imageURL,
+			"image/webp,image/apng,image/*,*/*;q=0.8",
+		)
+
+		if err != nil {
+			log.Printf(
+				"warning: remote cover upload failed for %s, using fallback: %v",
+				item.GUID,
+				err,
+			)
+			coverKey = w.fallbackImageURL
 		} else {
-			log.Printf("warning: fallback cover upload also failed for %s: %v", item.GUID, err)
+			coverKey = key
 		}
-	} else if err == nil {
-		coverKey = key
-	} else {
-		log.Printf("warning: fallback cover upload failed for %s: %v", item.GUID, err)
 	}
 
 	var duration *int

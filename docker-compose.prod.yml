@@ -105,8 +105,7 @@ services:
       - MINIO_USER=${MINIO_USER}
       - MINIO_PASS=${MINIO_PASS}
       - POSTGRES_URL=${POSTGRES_URL}
-      - LOAD_MODE=${LOAD_MODE}
-      - FRONTEND_PUBLIC_URL=${FRONTEND_PUBLIC_URL}
+
     restart: unless-stopped
 
   insertion:
@@ -164,7 +163,7 @@ services:
       - MINIO_USER=${MINIO_USER}
       - MINIO_PASS=${MINIO_PASS}
       - BACKEND_PORT=:8080
-      - CORS_ORIGINS=http://localhost:3000
+      - CORS_ORIGINS=${CORS_ORIGINS}
     restart: unless-stopped
 
   frontend:
@@ -174,6 +173,9 @@ services:
     environment:
       - NODE_ENV=production
       - BACKEND_URL=http://backend:8080 
+      - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL}
+      - FRONTEND_PUBLIC_URL=${FRONTEND_PUBLIC_URL}
+
     depends_on:
       - backend
     restart: unless-stopped

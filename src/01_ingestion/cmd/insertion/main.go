@@ -76,11 +76,7 @@ func main() {
 		seedURLs = os.Args[1:]
 	}
 
-	frontendURL := os.Getenv("FRONTEND_PUBLIC_URL")
-	if frontendURL == "" {
-		log.Fatal("FRONTEND_PUBLIC_URL environment variable is required")
-	}
-	fallbackImageURL := strings.TrimRight(frontendURL, "/") + "fallback-cover.svg"
+	fallbackImageURL := "/fallback_cover.svg"
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
