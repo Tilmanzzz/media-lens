@@ -1,0 +1,187 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASS}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./storage/db/init_v2.sql:/docker-entrypoint-initdb.d/init_v2.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    volumes:
+      - ./storage/db/pgadmin/servers.json:/pgadmin4/servers.json
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASS}
+      MINIO_API_CORS_ALLOW_ORIGIN: "http://141.62.115.192:3000,http://localhost:3000"
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 1
+
+  sectioning:
+    image: ghcr.io/tilmanzzz/media-lens-sectioning:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_URL=${POSTGRES_URL}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - LOG_LEVEL=INFO
+      - LOG_DIR=/app/logs
+    volumes:
+      - ./logs/sectioning:/app/logs
+    restart: unless-stopped
+
+  transcription:
+    image: ghcr.io/tilmanzzz/media-lens-transcription:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      sectioning:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - POSTGRES_URL=${POSTGRES_URL}
+      - USE_CUDA=true
+      - LOG_DIR=${LOG_DIR}
+    volumes:
+      - ./logs/transcription:/app/logs
+    restart: unless-stopped
+  
+  ingestion:
+    image: ghcr.io/tilmanzzz/media-lens-ingestion:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      transcription:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - POSTGRES_URL=${POSTGRES_URL}
+
+    restart: unless-stopped
+
+  insertion:
+    image: ghcr.io/tilmanzzz/media-lens-insertion:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      ingestion:
+        condition: service_started
+    env_file:
+      - .env
+    profiles: ["tools"]
+    environment:
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - POSTGRES_URL=${POSTGRES_URL}
+      - FRONTEND_PUBLIC_URL=${FRONTEND_PUBLIC_URL}
+
+  processing:
+    image: ghcr.io/tilmanzzz/media-lens-processing:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_URL=${POSTGRES_URL}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+    volumes:
+      - ./logs/processing:/app/src/02_processing/logs
+    command: ["--poll", "--poll-interval", "60", "--log-enabled"]
+    restart: unless-stopped
+
+  backend:
+    image: ghcr.io/tilmanzzz/media-lens-backend:latest
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASS}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_USER=${MINIO_USER}
+      - MINIO_PASS=${MINIO_PASS}
+      - BACKEND_PORT=:8080
+      - CORS_ORIGINS=${CORS_ORIGINS}
+    restart: unless-stopped
+
+  frontend:
+    image: ghcr.io/tilmanzzz/media-lens-frontend:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - BACKEND_URL=http://backend:8080 
+      - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL}
+      - FRONTEND_PUBLIC_URL=${FRONTEND_PUBLIC_URL}
+
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  minio_data:
+  pgadmin_data:
+  redis_data:
