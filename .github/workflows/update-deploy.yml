@@ -36,6 +36,7 @@ jobs:
           cp storage/db/init_v2.sql deploy_payload/storage/db/
           cp storage/db/pgadmin/servers.json deploy_payload/storage/db/pgadmin/
           cp -r docs/ deploy_payload/docs/
+
           
           # (Optional) Copy your .env.example template if you have one
           # cp .env.example deploy_payload/

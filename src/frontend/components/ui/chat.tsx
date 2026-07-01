@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect, type ReactNode } from "react";
+import { useState, useRef, useEffect } from "react";
+import ReactMarkdown from "react-markdown";
 
 interface Message {
   role: "user" | "assistant";
@@ -20,39 +21,10 @@ function parseTimestamp(ts: string): number {
   return parts[0] * 60 + parts[1];
 }
 
-const TIMESTAMP_RE = /\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g;
-
-function renderWithTimestamps(text: string, onSeek?: (time: number) => void): ReactNode[] {
-  if (!onSeek) return [text];
-
-  const nodes: ReactNode[] = [];
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = TIMESTAMP_RE.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      nodes.push(text.slice(lastIndex, match.index));
-    }
-    const ts = match[1];
-    const seconds = parseTimestamp(ts);
-    nodes.push(
-      <button
-        key={`${match.index}-${ts}`}
-        type="button"
-        onClick={() => onSeek(seconds)}
-        className="inline text-accent hover:text-accent-hover underline underline-offset-2 cursor-pointer font-medium"
-      >
-        [{ts}]
-      </button>
-    );
-    lastIndex = match.index + match[0].length;
-  }
-
-  if (lastIndex < text.length) {
-    nodes.push(text.slice(lastIndex));
-  }
-
-  return nodes.length > 0 ? nodes : [text];
+// Converts [01:30] into a markdown link: [01:30](timestamp:01:30)
+function preprocessTimestamps(text: string): string {
+  const TIMESTAMP_RE = /\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g;
+  return text.replace(TIMESTAMP_RE, "[$1](#timestamp:$1)"); 
 }
 
 export default function RagChat({
@@ -96,7 +68,7 @@ export default function RagChat({
 
       if (!res.ok) throw new Error(`Backend error ${res.status}`);
 
-      const data = await res.json() as { answer: string };
+      const data = (await res.json()) as { answer: string };
       setMessages((prev) => [...prev, { role: "assistant", content: data.answer }]);
     } catch {
       setMessages((prev) => [
@@ -126,12 +98,10 @@ export default function RagChat({
 
   return (
     <div className="flex flex-col h-full min-h-64 bg-background-card border border-border rounded-xl overflow-hidden">
-
       {/* Nachrichtenverlauf */}
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-2 text-center py-8">
-          </div>
+          <div className="flex flex-col items-center justify-center h-full gap-2 text-center py-8"></div>
         )}
 
         {messages.map((msg, index) => (
@@ -141,12 +111,63 @@ export default function RagChat({
           >
             <div
               className={`max-w-[80%] rounded-xl px-4 py-2.5 text-sm leading-relaxed
-                ${msg.role === "user"
-                  ? "bg-primary text-foreground rounded-br-sm"
-                  : "bg-background-raised text-foreground border border-border rounded-bl-sm"
+                ${
+                  msg.role === "user"
+                    ? "bg-primary text-foreground rounded-br-sm"
+                    : "bg-background-raised text-foreground border border-border rounded-bl-sm"
                 }`}
             >
-              {msg.role === "assistant" ? renderWithTimestamps(msg.content, onSeek) : msg.content}
+              {msg.role === "assistant" ? (
+                <ReactMarkdown
+                  components={{
+                    // Map generic text elements to preserve formatting since Tailwind resets them
+                    p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                    ul: ({ children }) => <ul className="list-disc pl-4 mb-2">{children}</ul>,
+                    ol: ({ children }) => <ol className="list-decimal pl-4 mb-2">{children}</ol>,
+                    strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                    code: ({ children }) => (
+                      <code className="bg-background-card border border-border rounded px-1 py-0.5 text-xs">
+                        {children}
+                      </code>
+                    ),
+                    // Intercept links to render timestamps as buttons
+                    a: ({ href, children }) => {
+                      if (href?.startsWith("#timestamp:")) {
+                        const ts = href.replace("#timestamp:", "");
+                        const seconds = parseTimestamp(ts);
+                        return (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault(); // Ensures the browser doesn't attempt any default routing
+                              onSeek?.(seconds);
+                            }}
+                            className="inline text-accent hover:text-accent-hover underline underline-offset-2 cursor-pointer font-medium"
+                          >
+                            {children}
+                          </button>
+                        );
+                      }
+                      
+                      // Render standard markdown links normally
+                      return (
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline text-accent"
+                        >
+                          {children}
+                        </a>
+                      );
+                    },
+                  }}
+                >
+                  {preprocessTimestamps(msg.content)}
+                </ReactMarkdown>
+              ) : (
+                msg.content
+              )}
             </div>
           </div>
         ))}
@@ -188,7 +209,6 @@ export default function RagChat({
           </svg>
         </button>
       </div>
-
     </div>
   );
 }

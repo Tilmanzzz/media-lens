@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -308,7 +310,10 @@ func (w *worker) processEpisode(
 		_ = w.store.StopPreviousBatchIfNeeded(ctx, existingEp.BatchID)
 	}
 
-	audioKey, err := w.uploadMedia(ctx, p.ID, item.GUID, "audio", "original", enclosureURL, "audio/mpeg, audio/*;q=0.9, */*;q=0.8")
+	// Generate safe MinIO folder name
+	storageFolderID := storageID(item.GUID)
+
+	audioKey, err := w.uploadMedia(ctx, p.ID, storageFolderID, "audio", "original", enclosureURL, "audio/mpeg, audio/*;q=0.9, */*;q=0.8")
 	if err != nil {
 		return nil, fmt.Errorf("audio upload failed: %w", err)
 	}
@@ -321,14 +326,13 @@ func (w *worker) processEpisode(
 
 	switch {
 	case imageURL == "":
-		// switch for fallback image if none was found
 		coverKey = w.fallbackImageURL
 
 	default:
 		key, err = w.uploadMedia(
 			ctx,
 			p.ID,
-			item.GUID,
+			storageFolderID,
 			"cover",
 			"image",
 			imageURL,
@@ -336,11 +340,7 @@ func (w *worker) processEpisode(
 		)
 
 		if err != nil {
-			log.Printf(
-				"warning: remote cover upload failed for %s, using fallback: %v",
-				item.GUID,
-				err,
-			)
+			log.Printf("warning: remote cover upload failed for %s, using fallback: %v", item.GUID, err)
 			coverKey = w.fallbackImageURL
 		} else {
 			coverKey = key
@@ -474,4 +474,11 @@ func parseDuration(val string) *int {
 		return nil
 	}
 	return &total
+}
+
+// converts any arbitrary string (like a URL-based GUID)
+// into a clean, 64-character hex string safe for MinIO/S3 object keys.
+func storageID(guid string) string {
+	hash := sha256.Sum256([]byte(guid))
+	return hex.EncodeToString(hash[:])
 }
