@@ -4,7 +4,7 @@
 <img width="945" height="530" alt="image" src="https://github.com/user-attachments/assets/b6070c69-afa5-46aa-9f98-4151c3791e9e" />
 
 
-# Demno
+# Demo
 ## Homepage
 <img width="3320" height="1950" alt="image" src="https://github.com/user-attachments/assets/8eb5ffdd-646e-4470-b43d-e7e44cc62665" />
 ## Detailed View
