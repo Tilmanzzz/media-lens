@@ -1,3 +1,20 @@
+# MediaLens – Rethinking Podcasts
+MediaLens is a web application developed at Stuttgart Media University that makes podcasts accessible, searchable, understandable, and interactive.
+
+Podcasts are automatically collected via RSS feeds or APIs, transcribed, and semantically analyzed. Users can search podcast content, ask questions about episodes, and jump directly to relevant passages with timestamps.
+
+Features
+- 🔍 Search across podcasts and transcripts
+- 🧠 Semantic search for topics and content
+- 💬 AI ChatBot that can provide references and timestamps
+- 📝 Automatic transcription and chapter generation
+- 🎧 Direct playback of relevant passages
+- 😊 Emotion and tone analysis
+- ✅ Fact-checking and statement evaluation with sources
+- 🔗 Similar podcast recommendations
+
+The project combines Data Engineering, AI, and Web Development to make spoken content as accessible and searchable as text.
+
 # Pitch Deck
 <img width="945" height="529" alt="image" src="https://github.com/user-attachments/assets/5fb98230-f616-4572-a2c8-9598760e2895" />
 <img width="945" height="528" alt="image" src="https://github.com/user-attachments/assets/f0030a33-154d-4c2f-86e9-bdf1a21f2f76" />
